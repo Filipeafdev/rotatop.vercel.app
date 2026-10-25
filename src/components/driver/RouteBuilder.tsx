@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Route, Stop, AddressSuggestion } from '../../types';
-import { searchAddressBR, resolveGoogleCoordinates } from '../../lib/geocoding';
+import { searchAddressBR, resolveGoogleCoordinates, getCityAnchor } from '../../lib/geocoding';
 import { optimizeRouteStops } from '../../lib/routeOptimizer';
 import {
   MapPin,
@@ -156,9 +156,10 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
     e.preventDefault();
     if (!clientName.trim() || !addressInput.trim()) return;
 
+    const anchor = getCityAnchor(addressInput);
     const coords = selectedCoords || {
-      lat: -23.5505 + (Math.random() - 0.5) * 0.08,
-      lng: -46.6333 + (Math.random() - 0.5) * 0.08,
+      lat: anchor.lat + (Math.random() - 0.5) * 0.04,
+      lng: anchor.lng + (Math.random() - 0.5) * 0.04,
     };
 
     const newStop: Stop = {

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ManifestItemDraft } from '../../types';
-import { searchAddressBR } from '../../lib/geocoding';
+import { searchAddressBR, geocodeAddressDirectly, getCityAnchor } from '../../lib/geocoding';
 import {
   Camera,
   FolderOpen,
@@ -18,6 +18,9 @@ import {
   ClipboardPaste,
   HelpCircle,
   FileSpreadsheet,
+  MapPin,
+  TrendingUp,
+  PackageCheck,
 } from 'lucide-react';
 
 interface OcrManifestModalProps {
@@ -381,31 +384,50 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
     setExtractedItems((prev) => [...prev, newItem]);
   };
 
+  const [geocodingStatus, setGeocodingStatus] = useState<string | null>(null);
+
   const handleConfirmImport = async () => {
     if (extractedItems.length === 0) return;
 
     setIsProcessing(true);
     const resolvedItems: ManifestItemDraft[] = [];
 
-    for (const item of extractedItems) {
+    for (let i = 0; i < extractedItems.length; i++) {
+      const item = extractedItems[i];
       if (!item.address.trim()) continue;
-      const suggestions = await searchAddressBR(item.address);
-      if (suggestions.length > 0) {
+
+      const cityName = item.city || 'Campinas';
+      setGeocodingStatus(`Localizando parada ${i + 1} de ${extractedItems.length}: ${item.clientName} em ${cityName}...`);
+
+      try {
+        const geo = await geocodeAddressDirectly(item.address, cityName);
+        if (geo && typeof geo.lat === 'number') {
+          resolvedItems.push({
+            ...item,
+            lat: geo.lat,
+            lng: geo.lng,
+            address: geo.formattedAddress || item.address,
+          });
+        } else {
+          const anchor = getCityAnchor(cityName);
+          resolvedItems.push({
+            ...item,
+            lat: anchor.lat + (Math.random() - 0.5) * 0.02,
+            lng: anchor.lng + (Math.random() - 0.5) * 0.02,
+          });
+        }
+      } catch (err) {
+        console.warn(`Erro ao geolocalizar ${item.clientName}:`, err);
+        const anchor = getCityAnchor(cityName);
         resolvedItems.push({
           ...item,
-          lat: suggestions[0].lat,
-          lng: suggestions[0].lng,
-          address: suggestions[0].displayName,
-        });
-      } else {
-        resolvedItems.push({
-          ...item,
-          lat: -23.5505 + (Math.random() - 0.5) * 0.05,
-          lng: -46.6333 + (Math.random() - 0.5) * 0.05,
+          lat: anchor.lat + (Math.random() - 0.5) * 0.02,
+          lng: anchor.lng + (Math.random() - 0.5) * 0.02,
         });
       }
     }
 
+    setGeocodingStatus(null);
     setIsProcessing(false);
     onImportStops(resolvedItems);
     onClose();
@@ -729,208 +751,286 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
         )}
 
         {/* SCREEN 3: EDITABLE EXTRACTED ITEMS TABLE WITH PHOTO COMPARISON */}
-        {extractedItems.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-black uppercase text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/30">
-                  {extractedItems.length} Paradas Prontas
-                </span>
-                <span className="text-xs text-slate-400">
-                  Verifique e edite os dados do seu romaneio:
-                </span>
+        {extractedItems.length > 0 && (() => {
+          const totalVal = extractedItems.reduce((acc, it) => acc + (Number(it.orderValue) || 0), 0);
+          const totalKg = extractedItems.reduce((acc, it) => acc + (Number(it.totalWeight) || 0), 0);
+          const detectedCities = Array.from(
+            new Set(extractedItems.map((it) => it.city || 'Campinas').filter(Boolean))
+          );
+
+          return (
+            <div>
+              {/* Summary KPIs Banner */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                <div className="bg-slate-950/80 border border-emerald-500/30 rounded-2xl p-2.5 flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+                    <Check className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-medium block">Total Entregas</span>
+                    <span className="text-sm font-black text-emerald-400">{extractedItems.length} paradas</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/80 border border-blue-500/30 rounded-2xl p-2.5 flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                    <TrendingUp className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-medium block">Valor Romaneio</span>
+                    <span className="text-sm font-black text-blue-400">
+                      R$ {totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/80 border border-indigo-500/30 rounded-2xl p-2.5 flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+                    <PackageCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-medium block">Peso Total</span>
+                    <span className="text-sm font-black text-indigo-300">
+                      {totalKg.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/80 border border-amber-500/30 rounded-2xl p-2.5 flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
+                    <MapPin className="w-4 h-4" />
+                  </div>
+                  <div className="overflow-hidden">
+                    <span className="text-[10px] text-slate-400 font-medium block">Municípios</span>
+                    <span className="text-xs font-bold text-amber-300 truncate block" title={detectedCities.join(', ')}>
+                      {detectedCities.join(', ')}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                {previewUrl && (
+              {/* Action Toolbar */}
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs text-slate-400">
+                  Verifique e edite os dados extraídos pela IA do seu romaneio:
+                </span>
+
+                <div className="flex items-center gap-2">
+                  {previewUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setShowImagePreviewInTable(!showImagePreviewInTable)}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300 rounded-lg border border-slate-700 flex items-center gap-1 transition-all"
+                    >
+                      {showImagePreviewInTable ? (
+                        <>
+                          <EyeOff className="w-3.5 h-3.5" />
+                          <span>Ocultar Foto</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Ver Foto do Romaneio</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => setShowImagePreviewInTable(!showImagePreviewInTable)}
-                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300 rounded-lg border border-slate-700 flex items-center gap-1 transition-all"
+                    onClick={handleAddNewItem}
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-blue-400 rounded-lg border border-slate-700 flex items-center gap-1 transition-all"
                   >
-                    {showImagePreviewInTable ? (
-                      <>
-                        <EyeOff className="w-3.5 h-3.5" />
-                        <span>Ocultar Foto</span>
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Ver Foto do Romaneio</span>
-                      </>
-                    )}
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Adicionar Linha</span>
                   </button>
-                )}
+                </div>
+              </div>
+
+              {/* Side-by-side or collapsible image preview */}
+              {previewUrl && showImagePreviewInTable && (
+                <div className="mb-3 p-3 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between gap-3">
+                  <img
+                    src={previewUrl}
+                    alt="Foto do Romaneio"
+                    className="max-h-36 rounded-lg object-contain border border-slate-700 shadow"
+                  />
+                  <div className="text-xs text-slate-400 leading-snug flex-1">
+                    <p className="font-bold text-white mb-1">Foto Original do Romaneio</p>
+                    <span>
+                      Compare visualmente as linhas da tabela abaixo com a imagem fotografada do seu romaneio.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Scrollable Editable List */}
+              <div className="max-h-[380px] overflow-y-auto space-y-2.5 pr-1">
+                {extractedItems.map((item, index) => (
+                  <div
+                    key={item.id}
+                    className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3.5 transition-all text-xs hover:border-slate-700"
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2 flex-1">
+                        <span className="w-6 h-6 rounded-lg bg-blue-600/30 text-blue-400 font-bold text-xs flex items-center justify-center border border-blue-500/30 shrink-0">
+                          {index + 1}
+                        </span>
+                        <input
+                          type="text"
+                          value={item.clientName}
+                          onChange={(e) => handleUpdateItem(item.id, 'clientName', e.target.value)}
+                          placeholder="Nome do Cliente ou Loja *"
+                          className="font-bold text-white bg-transparent border-b border-transparent hover:border-slate-700 focus:border-blue-500 focus:outline-none flex-1 px-1"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1.5 cursor-pointer bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={item.isPriority}
+                            onChange={(e) => handleUpdateItem(item.id, 'isPriority', e.target.checked)}
+                            className="rounded text-red-600 focus:ring-0"
+                          />
+                          <span className="text-[10px] font-bold text-rose-400">Prioridade</span>
+                        </label>
+
+                        <button
+                          onClick={() => handleDeleteItem(item.id)}
+                          className="text-slate-500 hover:text-rose-400 p-1"
+                          title="Remover parada"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Address with explicit City indicator */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-2">
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          value={item.address}
+                          onChange={(e) => handleUpdateItem(item.id, 'address', e.target.value)}
+                          placeholder="Endereço de entrega completo (Rua, Número, Bairro) *"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200 text-xs focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-blue-950/70 border border-blue-500/40 rounded-xl px-2.5 py-1.5 text-blue-300 font-bold shrink-0">
+                        <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                        <span className="text-[10px] text-slate-400">Município:</span>
+                        <input
+                          type="text"
+                          value={item.city || 'Campinas'}
+                          onChange={(e) => handleUpdateItem(item.id, 'city', e.target.value)}
+                          placeholder="Cidade"
+                          title="Município da entrega (coluna Cidades do romaneio)"
+                          className="bg-transparent border-none text-xs font-bold text-blue-300 w-24 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <span className="text-[10px] text-slate-500 block mb-0.5">Valor (R$)</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={item.orderValue}
+                          onChange={(e) =>
+                            handleUpdateItem(item.id, 'orderValue', parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] text-slate-500 block mb-0.5">Peso (kg)</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={item.totalWeight}
+                          onChange={(e) =>
+                            handleUpdateItem(item.id, 'totalWeight', parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-bold focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] text-slate-500 block mb-0.5">Pagamento</span>
+                        <select
+                          value={item.paymentMethod}
+                          onChange={(e) =>
+                            handleUpdateItem(item.id, 'paymentMethod', e.target.value as any)
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-slate-300 font-medium focus:outline-none focus:border-blue-500"
+                        >
+                          <option value="a_vista">À Vista</option>
+                          <option value="a_prazo">A Prazo</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] text-slate-500 block mb-0.5">Obs / Pedido</span>
+                        <input
+                          type="text"
+                          value={item.notes || ''}
+                          onChange={(e) => handleUpdateItem(item.id, 'notes', e.target.value)}
+                          placeholder="Ex: Pedido 6540297"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-amber-300 focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Progress status during geocoding */}
+              {geocodingStatus && (
+                <div className="mt-3 p-3 bg-blue-950/60 border border-blue-500/40 rounded-xl flex items-center gap-2 text-xs text-blue-200 animate-pulse">
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
+                  <span>{geocodingStatus}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExtractedItems([]);
+                    setPreviewUrl(null);
+                    setErrorMessage(null);
+                  }}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Escolher Outra Foto</span>
+                </button>
 
                 <button
                   type="button"
-                  onClick={handleAddNewItem}
-                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-blue-400 rounded-lg border border-slate-700 flex items-center gap-1 transition-all"
+                  onClick={handleConfirmImport}
+                  disabled={isProcessing}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl shadow-lg shadow-emerald-900/40 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Adicionar Linha</span>
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>{geocodingStatus || 'Validando Endereços com Google Maps...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Confirmar e Gerar Rota Automática</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
-
-            {/* Side-by-side or collapsible image preview */}
-            {previewUrl && showImagePreviewInTable && (
-              <div className="mb-3 p-3 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between gap-3">
-                <img
-                  src={previewUrl}
-                  alt="Foto do Romaneio"
-                  className="max-h-36 rounded-lg object-contain border border-slate-700 shadow"
-                />
-                <div className="text-xs text-slate-400 leading-snug flex-1">
-                  <p className="font-bold text-white mb-1">Foto Original do Romaneio</p>
-                  <span>
-                    Compare visualmente as linhas da tabela abaixo com a imagem fotografada do seu romaneio.
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Scrollable Editable List */}
-            <div className="max-h-[380px] overflow-y-auto space-y-2.5 pr-1">
-              {extractedItems.map((item, index) => (
-                <div
-                  key={item.id}
-                  className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3.5 transition-all text-xs"
-                >
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2 flex-1">
-                      <span className="w-6 h-6 rounded-lg bg-blue-600/30 text-blue-400 font-bold text-xs flex items-center justify-center border border-blue-500/30">
-                        {index + 1}
-                      </span>
-                      <input
-                        type="text"
-                        value={item.clientName}
-                        onChange={(e) => handleUpdateItem(item.id, 'clientName', e.target.value)}
-                        placeholder="Nome do Cliente ou Loja *"
-                        className="font-bold text-white bg-transparent border-b border-transparent hover:border-slate-700 focus:border-blue-500 focus:outline-none flex-1 px-1"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <label className="flex items-center gap-1.5 cursor-pointer bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
-                        <input
-                          type="checkbox"
-                          checked={item.isPriority}
-                          onChange={(e) => handleUpdateItem(item.id, 'isPriority', e.target.checked)}
-                          className="rounded text-red-600 focus:ring-0"
-                        />
-                        <span className="text-[10px] font-bold text-rose-400">Prioridade</span>
-                      </label>
-
-                      <button
-                        onClick={() => handleDeleteItem(item.id)}
-                        className="text-slate-500 hover:text-rose-400 p-1"
-                        title="Remover parada"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <input
-                    type="text"
-                    value={item.address}
-                    onChange={(e) => handleUpdateItem(item.id, 'address', e.target.value)}
-                    placeholder="Endereço de entrega completo (Rua, Número, Bairro, Cidade) *"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200 text-xs mb-2 focus:outline-none focus:border-blue-500"
-                  />
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block mb-0.5">Valor (R$)</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={item.orderValue}
-                        onChange={(e) =>
-                          handleUpdateItem(item.id, 'orderValue', parseFloat(e.target.value) || 0)
-                        }
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div>
-                      <span className="text-[10px] text-slate-500 block mb-0.5">Peso (kg)</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={item.totalWeight}
-                        onChange={(e) =>
-                          handleUpdateItem(item.id, 'totalWeight', parseFloat(e.target.value) || 0)
-                        }
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-bold focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-
-                    <div>
-                      <span className="text-[10px] text-slate-500 block mb-0.5">Pagamento</span>
-                      <select
-                        value={item.paymentMethod}
-                        onChange={(e) =>
-                          handleUpdateItem(item.id, 'paymentMethod', e.target.value as any)
-                        }
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-slate-300 font-medium focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="a_vista">À Vista</option>
-                        <option value="a_prazo">A Prazo</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <span className="text-[10px] text-slate-500 block mb-0.5">Obs / Horário</span>
-                      <input
-                        type="text"
-                        value={item.notes || ''}
-                        onChange={(e) => handleUpdateItem(item.id, 'notes', e.target.value)}
-                        placeholder="Ex: doca 2"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-amber-300 focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => {
-                  setExtractedItems([]);
-                  setPreviewUrl(null);
-                  setErrorMessage(null);
-                }}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl flex items-center gap-1.5"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Escolher Outra Foto</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleConfirmImport}
-                disabled={isProcessing}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl shadow-lg shadow-emerald-900/40 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {isProcessing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Validando Endereços com Google Maps...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>Confirmar e Gerar Rota Automática</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

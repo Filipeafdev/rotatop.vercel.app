@@ -95,6 +95,8 @@ export interface ManifestItemDraft {
   id: string;
   clientName: string;
   address: string;
+  city?: string;
+  neighborhood?: string;
   lat?: number;
   lng?: number;
   orderValue: number;

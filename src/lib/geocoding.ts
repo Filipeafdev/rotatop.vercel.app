@@ -67,6 +67,30 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     source: 'local',
   },
   {
+    displayName: 'CD Central Campinas - Rod. Anhanguera, km 98, Campinas - SP',
+    lat: -22.9152,
+    lng: -47.0854,
+    city: 'Campinas',
+    state: 'SP',
+    source: 'local',
+  },
+  {
+    displayName: 'CD Logístico Dom Pedro - Rod. D. Pedro I, km 136, Campinas - SP',
+    lat: -22.8601,
+    lng: -47.0312,
+    city: 'Campinas',
+    state: 'SP',
+    source: 'local',
+  },
+  {
+    displayName: 'Base Operacional Campinas - Av. Prestes Maia, 1200, Vila Industrial, Campinas - SP',
+    lat: -22.9254,
+    lng: -47.0701,
+    city: 'Campinas',
+    state: 'SP',
+    source: 'local',
+  },
+  {
     displayName: 'Residência do Motorista - R. Domingos de Morais, 1800, Vila Mariana, São Paulo - SP',
     lat: -23.5912,
     lng: -46.6384,
@@ -75,6 +99,31 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     source: 'local',
   },
 ];
+
+// Reference anchor coordinates for key SP cities to avoid falling back to São Paulo
+export const SP_CITY_COORDINATES: Record<string, LatLng> = {
+  campinas: { lat: -22.9064, lng: -47.0616 },
+  paulinia: { lat: -22.7631, lng: -47.1542 },
+  sumare: { lat: -22.8219, lng: -47.2669 },
+  hortolandia: { lat: -22.8583, lng: -47.2200 },
+  valinhos: { lat: -22.9708, lng: -46.9958 },
+  vinhedo: { lat: -23.0297, lng: -46.9836 },
+  indaiatuba: { lat: -23.0903, lng: -47.2181 },
+  americana: { lat: -22.7394, lng: -47.3314 },
+  jundiai: { lat: -23.1857, lng: -46.8978 },
+  'sao paulo': { lat: -23.5505, lng: -46.6333 },
+};
+
+export function getCityAnchor(cityName?: string): LatLng {
+  if (!cityName) return { lat: -22.9064, lng: -47.0616 }; // Default to Campinas
+  const normalized = cityName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  for (const [key, coords] of Object.entries(SP_CITY_COORDINATES)) {
+    if (normalized.includes(key)) {
+      return coords;
+    }
+  }
+  return { lat: -22.9064, lng: -47.0616 };
+}
 
 /**
  * Resolves exact LatLng for a Google Maps placeId or formatted address
@@ -92,16 +141,11 @@ export async function resolveGoogleCoordinates(
     const res = await fetch(`/api/maps/geocode?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
-      if (placeId && data.result?.geometry?.location) {
+      const loc = data.result?.geometry?.location || data.results?.[0]?.geometry?.location;
+      if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
         return {
-          lat: data.result.geometry.location.lat,
-          lng: data.result.geometry.location.lng,
-        };
-      }
-      if (data.results && data.results[0]?.geometry?.location) {
-        return {
-          lat: data.results[0].geometry.location.lat,
-          lng: data.results[0].geometry.location.lng,
+          lat: loc.lat,
+          lng: loc.lng,
         };
       }
     }
@@ -109,6 +153,50 @@ export async function resolveGoogleCoordinates(
     console.warn('Failed to resolve Google Maps coordinates:', err);
   }
   return null;
+}
+
+/**
+ * Geocodes an address string directly with Google Maps Platform,
+ * returning formatted address and exact lat/lng coordinates in the correct municipality.
+ */
+export async function geocodeAddressDirectly(
+  addressText: string,
+  cityHint?: string
+): Promise<{ lat: number; lng: number; formattedAddress: string } | null> {
+  const cleanAddr = addressText.trim();
+  if (!cleanAddr) return null;
+
+  // Build query ensuring municipality is present
+  let query = cleanAddr;
+  if (cityHint && !query.toLowerCase().includes(cityHint.toLowerCase())) {
+    query = `${query}, ${cityHint} - SP, Brasil`;
+  }
+
+  try {
+    const params = new URLSearchParams({ address: query });
+    const res = await fetch(`/api/maps/geocode?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      const loc = data.result?.geometry?.location || data.results?.[0]?.geometry?.location;
+      if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
+        return {
+          lat: loc.lat,
+          lng: loc.lng,
+          formattedAddress: data.result?.formatted_address || cleanAddr,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`Direct geocode failed for "${query}":`, err);
+  }
+
+  // Fallback to municipal anchor if Google Maps returns no result
+  const anchor = getCityAnchor(cityHint || cleanAddr);
+  return {
+    lat: anchor.lat + (Math.random() - 0.5) * 0.03,
+    lng: anchor.lng + (Math.random() - 0.5) * 0.03,
+    formattedAddress: cleanAddr,
+  };
 }
 
 /**

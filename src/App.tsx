@@ -5,6 +5,7 @@ import React, { useState, useEffect } from 'react';
 import { Route, Stop, UserProfile, UserRole, Vehicle, ManifestItemDraft } from './types';
 import { storage } from './lib/storage';
 import { optimizeRouteStops } from './lib/routeOptimizer';
+import { getCityAnchor } from './lib/geocoding';
 import { Navbar } from './components/Navbar';
 import { RouteMap } from './components/driver/RouteMap';
 import { StopCard } from './components/driver/StopCard';
@@ -216,14 +217,20 @@ export default function App() {
 
   // Import stops from OCR
   const handleImportOcrStops = (draftItems: ManifestItemDraft[]) => {
+    if (draftItems.length === 0) return;
+
+    // Detect primary municipality of imported stops
+    const detectedCity = draftItems.find((d) => d.city)?.city || 'Campinas';
+    const cityAnchor = getCityAnchor(detectedCity);
+
     const newStops: Stop[] = draftItems.map((item, idx) => ({
       id: `stop-ocr-${Date.now()}-${idx}`,
       routeId: activeRoute.id,
-      sequenceIndex: activeRoute.stops.length + idx + 1,
+      sequenceIndex: idx + 1,
       clientName: item.clientName,
       address: item.address,
-      lat: item.lat || -23.5505 + (Math.random() - 0.5) * 0.05,
-      lng: item.lng || -46.6333 + (Math.random() - 0.5) * 0.05,
+      lat: typeof item.lat === 'number' ? item.lat : cityAnchor.lat + (Math.random() - 0.5) * 0.03,
+      lng: typeof item.lng === 'number' ? item.lng : cityAnchor.lng + (Math.random() - 0.5) * 0.03,
       orderValue: item.orderValue,
       totalWeight: item.totalWeight,
       isPriority: item.isPriority,
@@ -233,20 +240,43 @@ export default function App() {
       createdAt: new Date().toISOString(),
     }));
 
-    const combinedStops = [...activeRoute.stops, ...newStops];
-    const totalWeightSum = combinedStops.reduce((acc, s) => acc + s.totalWeight, 0);
-    const totalValueSum = combinedStops.reduce((acc, s) => acc + s.orderValue, 0);
+    // If activeRoute only contains the initial sample stops (init-stop-...), replace them completely
+    const isReplacingInitialSample = activeRoute.stops.some((s) => s.id.startsWith('init-stop'));
+    const stopsToUse = isReplacingInitialSample ? newStops : [...activeRoute.stops, ...newStops];
+
+    // If imported stops are in Campinas/interior region and route origin is still default São Paulo CD:
+    let startCoords = activeRoute.startCoords;
+    let startAddress = activeRoute.startAddress;
+    let endCoords = activeRoute.endCoords;
+    let endAddress = activeRoute.endAddress;
+
+    if (
+      startAddress.includes('São Paulo') &&
+      (detectedCity.toLowerCase().includes('campinas') || newStops.some((s) => s.lat > -23.1))
+    ) {
+      startAddress = 'CD Central Campinas - Rod. Anhanguera, km 98, Campinas - SP';
+      startCoords = { lat: -22.9152, lng: -47.0854 };
+      endAddress = 'Base Operacional Campinas - Av. Prestes Maia, 1200, Campinas - SP';
+      endCoords = { lat: -22.9254, lng: -47.0701 };
+    }
+
+    const totalWeightSum = stopsToUse.reduce((acc, s) => acc + s.totalWeight, 0);
+    const totalValueSum = stopsToUse.reduce((acc, s) => acc + s.orderValue, 0);
 
     const opt = optimizeRouteStops(
-      combinedStops,
-      activeRoute.startCoords,
-      activeRoute.endCoords,
+      stopsToUse,
+      startCoords,
+      endCoords,
       activeRoute.avgKmLiter,
       activeRoute.fuelPrice
     );
 
     const updatedRoute: Route = {
       ...activeRoute,
+      startAddress,
+      startCoords,
+      endAddress,
+      endCoords,
       stops: opt.orderedStops,
       productiveKm: opt.productiveKm,
       unproductiveKm: opt.unproductiveKm,
@@ -258,7 +288,7 @@ export default function App() {
 
     handleUpdateRoute(updatedRoute);
     setDriverTab('execucao');
-    showToast(`${draftItems.length} paradas importadas do romaneio com sucesso!`);
+    showToast(`${draftItems.length} paradas de ${detectedCity} importadas e rota otimizada!`);
   };
 
   // Close entire day route

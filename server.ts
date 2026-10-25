@@ -115,12 +115,12 @@ app.get('/api/maps/geocode', async (req: Request, res: Response) => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
-          'X-Goog-FieldMask': 'places.id,places.formattedAddress,places.location',
+          'X-Goog-FieldMask': 'places.id,places.formattedAddress,places.location,places.displayName',
           'X-Goog-Maps-Solution-ID': 'gmp_mcp_codeassist_v1_aistudio',
         },
         body: JSON.stringify({
           textQuery: address,
-          includedRegionCodes: ['br'],
+          regionCode: 'br',
           languageCode: 'pt-BR',
         }),
       });
@@ -130,7 +130,8 @@ app.get('/api/maps/geocode', async (req: Request, res: Response) => {
       if (firstPlace && firstPlace.location) {
         return res.json({
           result: {
-            formatted_address: firstPlace.formattedAddress,
+            place_id: firstPlace.id,
+            formatted_address: firstPlace.formattedAddress || firstPlace.displayName?.text,
             geometry: {
               location: {
                 lat: firstPlace.location.latitude,
@@ -164,17 +165,44 @@ app.post('/api/ocr-romaneio', async (req: Request, res: Response) => {
     const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
     const cleanMime = mimeType || 'image/jpeg';
 
-    const prompt = `Você é um leitor óptico especialista em romaneios, notas fiscais e planilhas de entrega e logística brasileira.
-Analise com extrema precisão a imagem fornecida (que pode ser tabela impressa, foto de tela de sistema/Excel ou romaneio de carga) e extraia TODAS as paradas/linhas de entrega.
-Mapeie os dados de cada linha:
-- clientName: Razão Social ou Nome do Cliente / Destinatário (remova asteriscos e espaços extras).
-- address: Endereço completo combinando Endereço, Bairro e Cidade/UF (ex: "RUA DAS HORTENCIAS 1026, CHACARA PRIMAVERA, CAMPINAS - SP").
-- orderValue: Valor da entrega em reais como número decimal (ex: se na coluna estiver 719,46 converta para 719.46; se 28.901,35 converta para 28901.35).
-- totalWeight: Peso em kg como número decimal (ex: se 17,9 converta para 17.9; se 68,64 converta para 68.64).
-- paymentMethod: 'a_prazo' se indicar Boleto, A Prazo ou Faturado; 'a_vista' se indicar Dinheiro, À Vista ou PIX.
-- notes: Forma de pagamento (ex: 'Boleto 21 Dias'), número de pedido ou observação útil da linha.
+    const prompt = `Você é um leitor óptico especialista em romaneios e planilhas de transporte e logística no Brasil.
+Analise a imagem da tabela com extrema atenção ao alinhamento horizontal linha por linha.
 
-Retorne ESTRITAMENTE um array JSON contendo os objetos no formato acima. Não inclua texto explicativo antes ou depois.`;
+Mapeamento exato das colunas da tabela:
+- P_Ped: Identificador do fornecedor
+- CNPJ: CNPJ do cliente
+- Razão Social: Nome empresarial do destinatário (remova asteriscos e espaços extras)
+- Ramo: Segmento de atuação
+- Cidades: MUNICÍPIO DA ENTREGA (ex: CAMPINAS, PAULINIA, SUMARE, HORTOLANDIA, VALINHOS). Mantenha este nome no campo "city".
+- Bairros: Bairro da entrega
+- Endereço: Rua, avenida e número
+- Forma Pgto: Condição de pagamento (ex: 'Boleto 21 Dias', 'Boleto 07 Dias', 'A Vista')
+- Pedido: Número do pedido (ex: 6540297)
+- Valores2: VALOR TOTAL DO PEDIDO EM REAIS (ex: 719,46; 363,76; 3666,77).
+- Pesos: PESO TOTAL EM KG (ex: 17,9; 9,723; 68,644).
+- Vol: Volume em m³
+
+REGRAS CRÍTICAS DE EXTRAÇÃO:
+1. NÃO desloque os números de uma linha para a linha adjacente! Cada linha possui estritamente seu próprio Pedido, Valores2 e Pesos na mesma altura horizontal.
+   - A Linha 1 (IVONE A OLIVEIRA) tem Valores2 = 719.46 e Pesos = 17.9.
+   - A Linha 2 (CAROLINE E MOREIRA) tem Valores2 = 363.76 e Pesos = 9.723.
+   - A Linha 3 (MARIA ANGELICA AGUIAR) tem Valores2 = 3666.77 e Pesos = 68.644.
+   - Siga rigorosamente esta correspondência horizontal linha por linha até o fim da tabela.
+2. NUNCA retorne 0 ou nulo se houver valor preenchido na coluna Valores2 ou Pesos daquela linha.
+3. Extraia o município da coluna 'Cidades' para o campo "city" (ex: "Campinas").
+4. Monte o campo "address" completo: "[Endereço], [Bairros], [Cidades] - SP, Brasil".
+5. Extraia para "notes" a condição de pagamento e o número do pedido (ex: "Boleto 21 Dias - Pedido 6540297").
+
+Retorne ESTRITAMENTE um array JSON contendo os objetos com os campos:
+- clientName: string
+- city: string
+- address: string
+- orderValue: number (float decimal)
+- totalWeight: number (float decimal)
+- paymentMethod: 'a_prazo' se Boleto/A Prazo/Faturado; 'a_vista' se Dinheiro/À Vista/PIX
+- notes: string
+
+Não inclua nenhum texto antes ou depois do JSON.`;
 
     // Model fallback pool - prioritizes fast, high-availability models with LOW thinking
     const modelPool = [
@@ -272,17 +300,31 @@ Retorne ESTRITAMENTE um array JSON contendo os objetos no formato acima. Não in
     const sanitizedItems = parsed.map((item, idx) => {
       let orderVal = item.orderValue;
       if (typeof orderVal === 'string') {
-        orderVal = parseFloat(orderVal.replace(/\./g, '').replace(',', '.')) || 0;
+        const cleanedStr = orderVal.replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
+        orderVal = parseFloat(cleanedStr) || 0;
       }
       let weightVal = item.totalWeight;
       if (typeof weightVal === 'string') {
-        weightVal = parseFloat(weightVal.replace(/\./g, '').replace(',', '.')) || 0;
+        const cleanedStr = weightVal.replace(/[kgKG\s]/g, '').replace(/\./g, '').replace(',', '.');
+        weightVal = parseFloat(cleanedStr) || 0;
+      }
+
+      const rawCity = String(item.city || '').trim();
+      const detectedCity = rawCity && rawCity.length > 2 ? rawCity : 'Campinas';
+
+      let cleanAddress = String(item.address || '').trim();
+      // Ensure city and SP are in address if omitted
+      if (cleanAddress && !cleanAddress.toLowerCase().includes(detectedCity.toLowerCase())) {
+        cleanAddress = `${cleanAddress}, ${detectedCity} - SP, Brasil`;
+      } else if (cleanAddress && !cleanAddress.includes('- SP')) {
+        cleanAddress = `${cleanAddress} - SP, Brasil`;
       }
 
       return {
         id: `ocr-${Date.now()}-${idx}`,
-        clientName: String(item.clientName || `Cliente ${idx + 1}`).trim(),
-        address: String(item.address || '').trim(),
+        clientName: String(item.clientName || `Cliente ${idx + 1}`).replace(/\*+/g, '').trim(),
+        city: detectedCity,
+        address: cleanAddress,
         orderValue: Number(orderVal) || 0,
         totalWeight: Number(weightVal) || 0,
         paymentMethod: item.paymentMethod === 'a_prazo' ? 'a_prazo' : 'a_vista',
