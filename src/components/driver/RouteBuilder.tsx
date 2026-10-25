@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Route, Stop, AddressSuggestion } from '../../types';
-import { searchAddressBR } from '../../lib/geocoding';
+import { searchAddressBR, resolveGoogleCoordinates } from '../../lib/geocoding';
 import { optimizeRouteStops } from '../../lib/routeOptimizer';
 import {
   MapPin,
@@ -17,6 +17,9 @@ import {
   AlertCircle,
   Truck,
   RotateCw,
+  Compass,
+  Check,
+  X,
 } from 'lucide-react';
 
 interface RouteBuilderProps {
@@ -51,9 +54,39 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [showAddSuccess, setShowAddSuccess] = useState(false);
 
-  // Handle Autocomplete for Stop Address
+  // Debounce for Start Address Autocomplete
   useEffect(() => {
-    if (addressInput.length < 3) {
+    if (!startAddress || startAddress.trim().length < 2) {
+      setStartSuggestions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setIsSearchingStart(true);
+      const results = await searchAddressBR(startAddress);
+      setStartSuggestions(results);
+      setIsSearchingStart(false);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [startAddress]);
+
+  // Debounce for End Address Autocomplete
+  useEffect(() => {
+    if (!endAddress || endAddress.trim().length < 2) {
+      setEndSuggestions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setIsSearchingEnd(true);
+      const results = await searchAddressBR(endAddress);
+      setEndSuggestions(results);
+      setIsSearchingEnd(false);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [endAddress]);
+
+  // Debounce for Stop Address Autocomplete
+  useEffect(() => {
+    if (!addressInput || addressInput.trim().length < 2) {
       setAddressSuggestions([]);
       return;
     }
@@ -62,67 +95,67 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
       const results = await searchAddressBR(addressInput);
       setAddressSuggestions(results);
       setIsSearchingAddress(false);
-    }, 350);
+    }, 250);
     return () => clearTimeout(timer);
   }, [addressInput]);
 
-  // Handle Autocomplete for Start Address
-  const handleStartSearch = async (val: string) => {
-    setStartAddress(val);
-    if (val.length >= 3) {
-      setIsSearchingStart(true);
-      const res = await searchAddressBR(val);
-      setStartSuggestions(res);
-      setIsSearchingStart(false);
-    } else {
-      setStartSuggestions([]);
-    }
-  };
-
-  // Handle Autocomplete for End Address
-  const handleEndSearch = async (val: string) => {
-    setEndAddress(val);
-    if (val.length >= 3) {
-      setIsSearchingEnd(true);
-      const res = await searchAddressBR(val);
-      setEndSuggestions(res);
-      setIsSearchingEnd(false);
-    } else {
-      setEndSuggestions([]);
-    }
-  };
-
-  const handleSelectStart = (sug: AddressSuggestion) => {
+  const handleSelectStart = async (sug: AddressSuggestion) => {
     setStartAddress(sug.displayName);
     setStartSuggestions([]);
+    let lat = sug.lat;
+    let lng = sug.lng;
+    if (sug.placeId) {
+      const resolved = await resolveGoogleCoordinates(sug.placeId, sug.displayName);
+      if (resolved) {
+        lat = resolved.lat;
+        lng = resolved.lng;
+      }
+    }
     onUpdateRoute({
       ...route,
       startAddress: sug.displayName,
-      startCoords: { lat: sug.lat, lng: sug.lng },
+      startCoords: { lat, lng },
     });
   };
 
-  const handleSelectEnd = (sug: AddressSuggestion) => {
+  const handleSelectEnd = async (sug: AddressSuggestion) => {
     setEndAddress(sug.displayName);
     setEndSuggestions([]);
+    let lat = sug.lat;
+    let lng = sug.lng;
+    if (sug.placeId) {
+      const resolved = await resolveGoogleCoordinates(sug.placeId, sug.displayName);
+      if (resolved) {
+        lat = resolved.lat;
+        lng = resolved.lng;
+      }
+    }
     onUpdateRoute({
       ...route,
       endAddress: sug.displayName,
-      endCoords: { lat: sug.lat, lng: sug.lng },
+      endCoords: { lat, lng },
     });
   };
 
-  const handleSelectStopAddress = (sug: AddressSuggestion) => {
+  const handleSelectStopAddress = async (sug: AddressSuggestion) => {
     setAddressInput(sug.displayName);
-    setSelectedCoords({ lat: sug.lat, lng: sug.lng });
     setAddressSuggestions([]);
+    let lat = sug.lat;
+    let lng = sug.lng;
+    if (sug.placeId) {
+      const resolved = await resolveGoogleCoordinates(sug.placeId, sug.displayName);
+      if (resolved) {
+        lat = resolved.lat;
+        lng = resolved.lng;
+      }
+    }
+    setSelectedCoords({ lat, lng });
   };
 
   const handleAddStop = (e: React.FormEvent) => {
     e.preventDefault();
     if (!clientName.trim() || !addressInput.trim()) return;
 
-    // Use selected coordinates or generate approximate Brazilian coordinates
     const coords = selectedCoords || {
       lat: -23.5505 + (Math.random() - 0.5) * 0.08,
       lng: -46.6333 + (Math.random() - 0.5) * 0.08,
@@ -149,7 +182,6 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
     const totalWeightSum = updatedStops.reduce((acc, s) => acc + s.totalWeight, 0);
     const totalValueSum = updatedStops.reduce((acc, s) => acc + s.orderValue, 0);
 
-    // Auto calculate route metrics
     const opt = optimizeRouteStops(
       updatedStops,
       route.startCoords,
@@ -169,7 +201,6 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
       totalValue: totalValueSum,
     });
 
-    // Reset Form
     setClientName('');
     setAddressInput('');
     setSelectedCoords(null);
@@ -208,42 +239,81 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
           <div className="flex items-center gap-2">
             <Building2 className="w-5 h-5 text-emerald-400" />
             <h3 className="text-sm font-black text-white uppercase tracking-wider">
-              Endereços de Base (Cálculo de KM Vazio)
+              Endereços de Base (Google Maps Real)
             </h3>
           </div>
-          <span className="text-[11px] text-slate-400">
-            Origem da Carga e Destino Final
-          </span>
+          <div className="flex items-center gap-1.5 text-[10px] bg-blue-500/20 text-blue-400 border border-blue-500/40 px-2 py-0.5 rounded font-bold shadow-sm">
+            <MapPin className="w-3 h-3 text-blue-400" />
+            <span>Google Maps Autocomplete Ativo</span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Start Address (Company CD) */}
           <div className="relative">
-            <label className="block text-xs font-bold text-emerald-400 mb-1 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-              Ponto de Saída (Empresa / Galpão)
+            <label className="block text-xs font-bold text-emerald-400 mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                Ponto de Saída (Empresa / Galpão / CD)
+              </span>
+              {isSearchingStart && (
+                <span className="text-[10px] text-blue-400 animate-pulse font-normal">
+                  Buscando no Google Maps...
+                </span>
+              )}
             </label>
-            <div className="relative">
+            <div className="relative flex items-center">
               <input
                 type="text"
                 value={startAddress}
-                onChange={(e) => handleStartSearch(e.target.value)}
-                placeholder="Ex: CD Anhanguera, São Paulo"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 px-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 pr-8"
+                onChange={(e) => setStartAddress(e.target.value)}
+                placeholder="Digite nome da empresa, galpão ou rua..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 pl-3 pr-14 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
               />
-              <Building2 className="w-4 h-4 text-slate-500 absolute right-2.5 top-2.5" />
+              <div className="absolute right-2 flex items-center gap-1">
+                {startAddress && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStartAddress('');
+                      setStartSuggestions([]);
+                    }}
+                    className="p-1 text-slate-500 hover:text-white rounded"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+                <Building2 className="w-4 h-4 text-emerald-500 shrink-0" />
+              </div>
             </div>
 
+            {/* Suggestions for Start Address */}
             {startSuggestions.length > 0 && (
-              <div className="absolute z-30 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
+              <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
+                <div className="px-3 py-1 bg-slate-950 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
+                  <span>Resultados do Google Maps</span>
+                  <span className="text-blue-400">Clique para selecionar</span>
+                </div>
                 {startSuggestions.map((sug, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => handleSelectStart(sug)}
-                    className="w-full text-left p-2 hover:bg-slate-800 text-xs text-slate-200 border-b border-slate-800/60 block"
+                    className="w-full text-left p-2.5 hover:bg-slate-800 text-xs text-slate-200 border-b border-slate-800/60 flex items-center justify-between gap-2 transition-colors cursor-pointer"
                   >
-                    <p className="font-semibold">{sug.displayName}</p>
+                    <div className="flex items-start gap-1.5 truncate">
+                      <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                      <span className="truncate font-medium">{sug.displayName}</span>
+                    </div>
+                    {sug.source === 'google' ? (
+                      <span className="text-[9px] bg-blue-500/20 text-blue-400 border border-blue-500/40 font-bold px-1.5 py-0.5 rounded shrink-0">
+                        Google Maps
+                      </span>
+                    ) : (
+                      <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded shrink-0">
+                        Base
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -252,31 +322,69 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
 
           {/* End Address (Driver's Residence) */}
           <div className="relative">
-            <label className="block text-xs font-bold text-purple-400 mb-1 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block"></span>
-              Ponto de Chegada (Residência do Motorista)
+            <label className="block text-xs font-bold text-purple-400 mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-purple-500 inline-block"></span>
+                Ponto de Chegada (Residência do Motorista)
+              </span>
+              {isSearchingEnd && (
+                <span className="text-[10px] text-blue-400 animate-pulse font-normal">
+                  Buscando no Google Maps...
+                </span>
+              )}
             </label>
-            <div className="relative">
+            <div className="relative flex items-center">
               <input
                 type="text"
                 value={endAddress}
-                onChange={(e) => handleEndSearch(e.target.value)}
-                placeholder="Ex: R. Domingos de Morais, Vila Mariana"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 px-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 pr-8"
+                onChange={(e) => setEndAddress(e.target.value)}
+                placeholder="Digite sua rua, bairro ou CEP residencial..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 pl-3 pr-14 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
               />
-              <Home className="w-4 h-4 text-slate-500 absolute right-2.5 top-2.5" />
+              <div className="absolute right-2 flex items-center gap-1">
+                {endAddress && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEndAddress('');
+                      setEndSuggestions([]);
+                    }}
+                    className="p-1 text-slate-500 hover:text-white rounded"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+                <Home className="w-4 h-4 text-purple-400 shrink-0" />
+              </div>
             </div>
 
+            {/* Suggestions for End Address */}
             {endSuggestions.length > 0 && (
-              <div className="absolute z-30 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
+              <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
+                <div className="px-3 py-1 bg-slate-950 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
+                  <span>Resultados do Google Maps</span>
+                  <span className="text-blue-400">Clique para selecionar</span>
+                </div>
                 {endSuggestions.map((sug, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => handleSelectEnd(sug)}
-                    className="w-full text-left p-2 hover:bg-slate-800 text-xs text-slate-200 border-b border-slate-800/60 block"
+                    className="w-full text-left p-2.5 hover:bg-slate-800 text-xs text-slate-200 border-b border-slate-800/60 flex items-center justify-between gap-2 transition-colors cursor-pointer"
                   >
-                    <p className="font-semibold">{sug.displayName}</p>
+                    <div className="flex items-start gap-1.5 truncate">
+                      <MapPin className="w-3.5 h-3.5 text-purple-400 shrink-0 mt-0.5" />
+                      <span className="truncate font-medium">{sug.displayName}</span>
+                    </div>
+                    {sug.source === 'google' ? (
+                      <span className="text-[9px] bg-blue-500/20 text-blue-400 border border-blue-500/40 font-bold px-1.5 py-0.5 rounded shrink-0">
+                        Google Maps
+                      </span>
+                    ) : (
+                      <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded shrink-0">
+                        Base
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -293,7 +401,7 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
           className="px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-950 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
         >
           <Sparkles className="w-4 h-4 text-amber-300" />
-          <span>Escanear Romaneio Físico (OCR com IA)</span>
+          <span>Escanear / Galeria de Romaneio (OCR com IA)</span>
         </button>
 
         <button
@@ -313,7 +421,7 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
           <div className="flex items-center gap-2">
             <Plus className="w-5 h-5 text-blue-400" />
             <h3 className="text-sm font-black text-white uppercase tracking-wider">
-              Adicionar Entrega Manual
+              Adicionar Entrega Manual com Google Maps
             </h3>
           </div>
           {showAddSuccess && (
@@ -325,7 +433,6 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
 
         <form onSubmit={handleAddStop} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Client Name */}
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
                 Nome do Cliente / Estabelecimento *
@@ -340,13 +447,14 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
               />
             </div>
 
-            {/* Address with Robust Autocomplete for Brazil */}
             <div className="relative">
               <label className="block text-xs font-bold text-slate-300 mb-1 flex items-center justify-between">
-                <span>Endereço de Entrega (Brasil) *</span>
+                <span className="flex items-center gap-1.5">
+                  <span>Endereço de Entrega (Google Maps Real) *</span>
+                </span>
                 {isSearchingAddress && (
                   <span className="text-[10px] text-blue-400 animate-pulse font-normal">
-                    Buscando ruas...
+                    Consultando Google Places...
                   </span>
                 )}
               </label>
@@ -359,7 +467,7 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
                     setAddressInput(e.target.value);
                     setSelectedCoords(null);
                   }}
-                  placeholder="Rua, número, bairro, cidade ou CEP..."
+                  placeholder="Digite rua, número, bairro ou cidade..."
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-blue-500 pr-8"
                 />
                 <Search className="w-4 h-4 text-slate-500 absolute right-2.5 top-2.5" />
@@ -367,18 +475,31 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
 
               {/* Autocomplete Dropdown */}
               {addressSuggestions.length > 0 && (
-                <div className="absolute z-40 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-52 overflow-y-auto">
+                <div className="absolute z-50 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
+                  <div className="px-3 py-1 bg-slate-950 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
+                    <span>Resultados do Google Maps</span>
+                    <span className="text-blue-400">Clique para selecionar</span>
+                  </div>
                   {addressSuggestions.map((sug, idx) => (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => handleSelectStopAddress(sug)}
-                      className="w-full text-left p-2.5 hover:bg-slate-800 text-xs text-slate-200 border-b border-slate-800/60 block transition-colors"
+                      className="w-full text-left p-2.5 hover:bg-slate-800 text-xs text-slate-200 border-b border-slate-800/60 flex items-center justify-between gap-2 transition-colors cursor-pointer"
                     >
-                      <div className="flex items-start gap-1.5">
+                      <div className="flex items-start gap-1.5 truncate">
                         <MapPin className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-                        <span className="line-clamp-2">{sug.displayName}</span>
+                        <span className="truncate">{sug.displayName}</span>
                       </div>
+                      {sug.source === 'google' ? (
+                        <span className="text-[9px] bg-blue-500/20 text-blue-400 border border-blue-500/30 font-bold px-1.5 py-0.5 rounded shrink-0">
+                          Google Maps
+                        </span>
+                      ) : (
+                        <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded shrink-0">
+                          Base
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -386,7 +507,6 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
             </div>
           </div>
 
-          {/* Value, Weight, Priority, Payment */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">

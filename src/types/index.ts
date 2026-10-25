@@ -87,6 +87,8 @@ export interface AddressSuggestion {
   lng: number;
   city?: string;
   state?: string;
+  placeId?: string;
+  source?: 'google' | 'osm' | 'local';
 }
 
 export interface ManifestItemDraft {

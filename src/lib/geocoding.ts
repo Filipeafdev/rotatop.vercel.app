@@ -8,6 +8,7 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.7456,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
   {
     displayName: 'Galpão Logístico Rotatop - Av. das Nações Unidas, 14401, São Paulo - SP',
@@ -15,6 +16,7 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.7029,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
   {
     displayName: 'Garagem & Base Operacional - R. Vergueiro, 3185, Vila Mariana, São Paulo - SP',
@@ -22,6 +24,7 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.6347,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
   {
     displayName: 'Supermercado Central - Av. Brigadeiro Faria Lima, 2232, Pinheiros, São Paulo - SP',
@@ -29,6 +32,7 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.6908,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
   {
     displayName: 'Drogaria Pacheco & Cia - Av. Paulista, 1000, Bela Vista, São Paulo - SP',
@@ -36,6 +40,7 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.6517,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
   {
     displayName: 'Restaurante Sabor de Minas - R. Augusta, 1492, Consolação, São Paulo - SP',
@@ -43,6 +48,7 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.6577,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
   {
     displayName: 'Padaria Bella Paulista - R. Haddock Lobo, 354, Cerqueira César, São Paulo - SP',
@@ -50,6 +56,7 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.6625,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
   {
     displayName: 'Auto Peças Express - Av. do Estado, 5500, Cambuci, São Paulo - SP',
@@ -57,6 +64,7 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.6198,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
   {
     displayName: 'Residência do Motorista - R. Domingos de Morais, 1800, Vila Mariana, São Paulo - SP',
@@ -64,21 +72,86 @@ export const BRAZIL_POPULAR_HUBS: AddressSuggestion[] = [
     lng: -46.6384,
     city: 'São Paulo',
     state: 'SP',
+    source: 'local',
   },
 ];
 
 /**
- * Searches Brazilian addresses using OpenStreetMap Nominatim with a debounce and fallback
+ * Resolves exact LatLng for a Google Maps placeId or formatted address
+ */
+export async function resolveGoogleCoordinates(
+  placeId?: string,
+  addressText?: string
+): Promise<LatLng | null> {
+  try {
+    const params = new URLSearchParams();
+    if (placeId) params.set('placeId', placeId);
+    else if (addressText) params.set('address', addressText);
+    else return null;
+
+    const res = await fetch(`/api/maps/geocode?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (placeId && data.result?.geometry?.location) {
+        return {
+          lat: data.result.geometry.location.lat,
+          lng: data.result.geometry.location.lng,
+        };
+      }
+      if (data.results && data.results[0]?.geometry?.location) {
+        return {
+          lat: data.results[0].geometry.location.lat,
+          lng: data.results[0].geometry.location.lng,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to resolve Google Maps coordinates:', err);
+  }
+  return null;
+}
+
+/**
+ * Searches Brazilian addresses using Google Maps Platform Places Autocomplete
+ * with seamless fallback to OpenStreetMap Nominatim and local hubs.
  */
 export async function searchAddressBR(query: string): Promise<AddressSuggestion[]> {
   const clean = query.trim();
   if (!clean || clean.length < 2) return [];
 
-  // Check matching local seeds first for instant high-speed suggestions
+  // Check matching local seeds first
   const localMatches = BRAZIL_POPULAR_HUBS.filter((hub) =>
     hub.displayName.toLowerCase().includes(clean.toLowerCase())
   );
 
+  // 1. Try Google Maps Platform Places Autocomplete
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
+    const gRes = await fetch(`/api/maps/autocomplete?input=${encodeURIComponent(clean)}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (gRes.ok) {
+      const gData = await gRes.json();
+      if (Array.isArray(gData.predictions) && gData.predictions.length > 0) {
+        const googleSuggestions: AddressSuggestion[] = gData.predictions.slice(0, 6).map((pred: any) => ({
+          displayName: pred.description,
+          placeId: pred.place_id,
+          lat: -23.5505, // default anchor, resolved when user selects
+          lng: -46.6333,
+          source: 'google' as const,
+        }));
+        return googleSuggestions;
+      }
+    }
+  } catch (err) {
+    console.warn('Google Maps autocomplete lookup skipped, trying fallback:', err);
+  }
+
+  // 2. Fallback to OpenStreetMap Nominatim
   try {
     const encoded = encodeURIComponent(clean);
     const controller = new AbortController();
@@ -104,9 +177,9 @@ export async function searchAddressBR(query: string): Promise<AddressSuggestion[
           lng: parseFloat(item.lon),
           city: item.address?.city || item.address?.town || item.address?.municipality,
           state: item.address?.state,
+          source: 'osm' as const,
         }));
 
-        // Merge deduplicating by proximity
         const combined = [...localMatches];
         for (const rem of remoteResults) {
           if (!combined.some((c) => Math.abs(c.lat - rem.lat) < 0.001 && Math.abs(c.lng - rem.lng) < 0.001)) {
@@ -120,7 +193,6 @@ export async function searchAddressBR(query: string): Promise<AddressSuggestion[
     console.warn('Nominatim geocode fallback triggered:', err);
   }
 
-  // If remote fails or offline, return best local matches or generate coordinates centered near São Paulo
   if (localMatches.length > 0) return localMatches;
 
   return [
@@ -130,13 +202,14 @@ export async function searchAddressBR(query: string): Promise<AddressSuggestion[
       lng: -46.6333 + (Math.random() - 0.5) * 0.06,
       city: 'São Paulo',
       state: 'SP',
+      source: 'local' as const,
     },
   ];
 }
 
 /**
  * Calculates Haversine distance in KM between 2 coordinates
- * with 1.3x road winding factor for urban Brazilian traffic
+ * with 1.32x road winding factor for urban Brazilian traffic
  */
 export function calculateRoadDistanceKm(c1: LatLng, c2: LatLng): number {
   if (c1.lat === c2.lat && c1.lng === c2.lng) return 0;
@@ -154,7 +227,6 @@ export function calculateRoadDistanceKm(c1: LatLng, c2: LatLng): number {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const straightKm = R * c;
 
-  // Road factor accounts for city turns and avenues
   const roadFactor = 1.32;
   return Number((straightKm * roadFactor).toFixed(1));
 }
