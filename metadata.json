@@ -1,0 +1,6 @@
+{
+  "name": "Rotatop - Gestão Logística e Rotas Inteligentes",
+  "description": "Sistema completo de gestão logística, romaneio inteligente com OCR, otimização de rotas e controle financeiro de combustível para frotas e motoristas.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

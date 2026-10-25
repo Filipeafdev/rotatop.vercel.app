@@ -1,0 +1,107 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role-based access for drivers and fleet managers",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["motorista", "gestor"] },
+        "phone": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Fleet vehicle with fuel consumption parameters",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "plate": { "type": "string" },
+        "model": { "type": "string" },
+        "brand": { "type": "string" },
+        "avgKmLiter": { "type": "number" },
+        "fuelType": { "type": "string" },
+        "status": { "type": "string", "enum": ["ativo", "manutencao", "inativo"] },
+        "assignedDriverName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "plate", "model", "avgKmLiter"]
+    },
+    "Route": {
+      "title": "Route",
+      "description": "A logistics delivery route with financial & odometer metrics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["planejada", "em_andamento", "concluida", "cancelada"] },
+        "startAddress": { "type": "string" },
+        "endAddress": { "type": "string" },
+        "productiveKm": { "type": "number" },
+        "unproductiveKm": { "type": "number" },
+        "totalKm": { "type": "number" },
+        "avgKmLiter": { "type": "number" },
+        "fuelPrice": { "type": "number" },
+        "estimatedFuelCost": { "type": "number" },
+        "totalWeight": { "type": "number" },
+        "totalValue": { "type": "number" },
+        "deliveredWeight": { "type": "number" },
+        "deliveredValue": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "driverId", "date", "status"]
+    },
+    "Stop": {
+      "title": "Stop",
+      "description": "An individual delivery stop in the manifest",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "routeId": { "type": "string" },
+        "driverId": { "type": "string" },
+        "sequenceIndex": { "type": "number" },
+        "clientName": { "type": "string" },
+        "address": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "orderValue": { "type": "number" },
+        "totalWeight": { "type": "number" },
+        "isPriority": { "type": "boolean" },
+        "paymentMethod": { "type": "string", "enum": ["a_vista", "a_prazo"] },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["pendente", "entregue", "cancelada", "reentregar"] },
+        "cancelReason": { "type": "string" },
+        "deliveredAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "routeId", "clientName", "address", "orderValue", "totalWeight", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles for authenticated drivers and managers"
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": "Vehicle",
+      "description": "Fleet vehicles collection"
+    },
+    "/routes/{routeId}": {
+      "schema": "Route",
+      "description": "Delivery routes and manifests"
+    },
+    "/routes/{routeId}/stops/{stopId}": {
+      "schema": "Stop",
+      "description": "Delivery stops under a route"
+    }
+  }
+}
