@@ -10,32 +10,62 @@ import {
   CompanyBase,
 } from '../types';
 
-// Migration flag to ensure old mock data from previous turns is cleanly cleared
-const STORAGE_CLEAN_VERSION_KEY = 'rotatop_clean_pilot_v3';
+// Migration flag to ensure team setup is cleanly initialized
+const STORAGE_CLEAN_VERSION_KEY = 'rotatop_team_pilot_v4';
 if (typeof window !== 'undefined' && !localStorage.getItem(STORAGE_CLEAN_VERSION_KEY)) {
-  // Clear old mock data keys
-  localStorage.removeItem('rotatop_vehicles_v1');
-  localStorage.removeItem('rotatop_active_route_v1');
-  localStorage.removeItem('rotatop_history_routes_v1');
-  localStorage.removeItem('rotatop_user_profile_v1');
-  localStorage.removeItem('rotatop_maintenances_v1');
-  localStorage.removeItem('rotatop_deletion_requests_v1');
-  localStorage.removeItem('rotatop_drivers_v1');
+  // Clear old storage keys to initialize the 3-user team cleanly
+  localStorage.removeItem('rotatop_vehicles_v2');
+  localStorage.removeItem('rotatop_active_route_v2');
+  localStorage.removeItem('rotatop_history_routes_v2');
+  localStorage.removeItem('rotatop_user_profile_v2');
+  localStorage.removeItem('rotatop_maintenances_v2');
+  localStorage.removeItem('rotatop_deletion_requests_v2');
+  localStorage.removeItem('rotatop_drivers_v2');
   localStorage.setItem(STORAGE_CLEAN_VERSION_KEY, 'true');
 }
 
-// Initial Clean State (No Fictitious Data)
+// Initial Clean State
 export const INITIAL_VEHICLES: Vehicle[] = [];
 
 export const INITIAL_COMPANY_BASES: CompanyBase[] = [];
 
 export const INITIAL_USERS: UserProfile[] = [
   {
-    uid: 'gestor-filipe',
-    email: 'filipeafdev@gmail.com',
-    displayName: 'Filipe (Gestor)',
+    uid: 'gestor-guilherme',
+    email: 'guilherme@rotatop.com.br',
+    displayName: 'Guilherme (Gestor / Dono da Frota)',
     role: 'gestor',
     phone: '',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    uid: 'gestor-filipe',
+    email: 'filipeafdev@gmail.com',
+    displayName: 'Filipe (Adm Master)',
+    role: 'gestor',
+    phone: '',
+    createdAt: new Date().toISOString(),
+  },
+];
+
+export const INITIAL_DRIVERS: UserProfile[] = [
+  {
+    uid: 'driver-filipe',
+    email: 'filipeafdev@gmail.com',
+    displayName: 'Filipe (Motorista)',
+    role: 'motorista',
+    accessPassword: 'Rota@1234',
+    phone: '',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    uid: 'driver-fabio',
+    email: 'fabio@rotatop.com.br',
+    displayName: 'Fábio (Motorista)',
+    role: 'motorista',
+    accessPassword: 'Rota@2026',
+    phone: '',
+    createdAt: new Date().toISOString(),
   },
 ];
 
@@ -118,12 +148,18 @@ export const storage = {
   getDrivers(): UserProfile[] {
     const raw = localStorage.getItem(KEY_DRIVERS);
     if (!raw) {
-      return [];
+      localStorage.setItem(KEY_DRIVERS, JSON.stringify(INITIAL_DRIVERS));
+      return INITIAL_DRIVERS;
     }
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+      localStorage.setItem(KEY_DRIVERS, JSON.stringify(INITIAL_DRIVERS));
+      return INITIAL_DRIVERS;
     } catch {
-      return [];
+      return INITIAL_DRIVERS;
     }
   },
 
@@ -265,13 +301,13 @@ export const storage = {
   getCurrentUser(): UserProfile {
     const raw = localStorage.getItem(KEY_CURRENT_USER);
     if (!raw) {
-      localStorage.setItem(KEY_CURRENT_USER, JSON.stringify(INITIAL_USERS[0]));
-      return INITIAL_USERS[0];
+      localStorage.setItem(KEY_CURRENT_USER, JSON.stringify(INITIAL_USERS[1]));
+      return INITIAL_USERS[1];
     }
     try {
       return JSON.parse(raw);
     } catch {
-      return INITIAL_USERS[0];
+      return INITIAL_USERS[1];
     }
   },
 

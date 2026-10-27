@@ -23,6 +23,10 @@ interface StopCardProps {
   onCancel: (stopId: string, reason: string) => void;
   onReschedule: (stopId: string) => void;
   onReopen?: (stopId: string) => void;
+  onMoveUp?: (stopId: string) => void;
+  onMoveDown?: (stopId: string) => void;
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
 export const StopCard: React.FC<StopCardProps> = ({
@@ -32,6 +36,10 @@ export const StopCard: React.FC<StopCardProps> = ({
   onCancel,
   onReschedule,
   onReopen,
+  onMoveUp,
+  onMoveDown,
+  isFirst,
+  isLast,
 }) => {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -61,20 +69,53 @@ export const StopCard: React.FC<StopCardProps> = ({
       {/* Top Header: Badge, Client, Priority */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div
-            className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center font-black text-sm text-white shadow-md ${
-              stop.status === 'entregue'
-                ? 'bg-emerald-600'
-                : stop.status === 'cancelada'
-                ? 'bg-rose-600'
-                : stop.status === 'reentregar'
-                ? 'bg-amber-600 animate-pulse'
-                : isCurrentNext
-                ? 'bg-blue-600 ring-2 ring-blue-400'
-                : 'bg-slate-700'
-            }`}
-          >
-            #{stop.sequenceIndex}
+          {/* Sequence badge + Reorder up/down buttons */}
+          <div className="flex items-center gap-1 shrink-0">
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm text-white shadow-md ${
+                stop.status === 'entregue'
+                  ? 'bg-emerald-600'
+                  : stop.status === 'cancelada'
+                  ? 'bg-rose-600'
+                  : stop.status === 'reentregar'
+                  ? 'bg-amber-600 animate-pulse'
+                  : isCurrentNext
+                  ? 'bg-blue-600 ring-2 ring-blue-400'
+                  : 'bg-slate-700'
+              }`}
+            >
+              #{stop.sequenceIndex}
+            </div>
+
+            {/* Up/Down Arrows to Reorder Delivery Position */}
+            {(onMoveUp || onMoveDown) && stop.status !== 'entregue' && (
+              <div className="flex flex-col gap-0.5">
+                <button
+                  type="button"
+                  disabled={isFirst}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMoveUp?.(stop.id);
+                  }}
+                  className="p-1 rounded bg-slate-800 hover:bg-blue-600 active:scale-90 disabled:opacity-20 disabled:hover:bg-slate-800 text-slate-300 hover:text-white transition-all cursor-pointer"
+                  title="Mover parada para cima (entregar antes)"
+                >
+                  <ChevronUp className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  disabled={isLast}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMoveDown?.(stop.id);
+                  }}
+                  className="p-1 rounded bg-slate-800 hover:bg-blue-600 active:scale-90 disabled:opacity-20 disabled:hover:bg-slate-800 text-slate-300 hover:text-white transition-all cursor-pointer"
+                  title="Mover parada para baixo (entregar depois)"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              </div>
+            )}
           </div>
 
           <div>

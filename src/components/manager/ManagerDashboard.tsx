@@ -12,6 +12,7 @@ import {
 } from '../../types';
 import { MAINTENANCE_TYPE_LABELS } from '../driver/MaintenanceView';
 import { searchAddressBR, resolveGoogleCoordinates, getCityAnchor } from '../../lib/geocoding';
+import { ManifestViewerModal } from '../common/ManifestViewerModal';
 import {
   Truck,
   Users,
@@ -84,8 +85,29 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   onSaveDrivers,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'kpis' | 'bases' | 'maintenances' | 'requests' | 'vehicles' | 'drivers'
+    'kpis' | 'romaneios' | 'bases' | 'maintenances' | 'requests' | 'vehicles' | 'drivers'
   >('kpis');
+
+  // Manifest Image Lightbox Viewer Modal State
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [viewerImages, setViewerImages] = useState<string[]>([]);
+  const [viewerTitle, setViewerTitle] = useState('');
+  const [viewerMeta, setViewerMeta] = useState<{ driverName?: string; vehiclePlate?: string; date?: string }>({});
+
+  const handleOpenManifestViewer = (targetRoute: Route) => {
+    const imgs =
+      targetRoute.manifestImages && targetRoute.manifestImages.length > 0
+        ? targetRoute.manifestImages
+        : ['/assets/aistudio/image_0f309c5a.png'];
+    setViewerImages(imgs);
+    setViewerTitle(`Romaneio Digitalizado - ${targetRoute.driverName || 'Motorista'} (${targetRoute.date})`);
+    setViewerMeta({
+      driverName: targetRoute.driverName,
+      vehiclePlate: targetRoute.vehiclePlate,
+      date: targetRoute.date,
+    });
+    setIsViewerOpen(true);
+  };
 
   // Company Base Modal State
   const [showBaseModal, setShowBaseModal] = useState(false);
@@ -583,6 +605,18 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('romaneios')}
+          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'romaneios'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30'
+              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+          }`}
+        >
+          <FileSpreadsheet className="w-4 h-4 text-amber-400" />
+          <span>Romaneios & Rotas</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('bases')}
           className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'bases'
@@ -799,6 +833,182 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB: ROMANEIOS & ROTAS (ACESSO EXCLUSIVO DO GESTOR ÀS IMAGENS ESCANEADAS) */}
+      {activeTab === 'romaneios' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Header Banner */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white uppercase tracking-wider">
+                    Auditoria de Romaneios & Fotos Escaneadas
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Acesse as folhas originais de romaneio fotografadas pelos motoristas no celular, paradas e odômetros apurados
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-xs font-bold text-slate-400 bg-slate-950 px-3.5 py-2 rounded-xl border border-slate-800 self-start sm:self-auto">
+              Total de Rotas com Romaneio:{' '}
+              <strong className="text-amber-400">
+                {[activeRoute, ...historicalRoutes].filter((r) => r.stops && r.stops.length > 0).length}
+              </strong>
+            </div>
+          </div>
+
+          {/* Routes Cards List */}
+          {(() => {
+            const allAuditedRoutes = [activeRoute, ...historicalRoutes].filter(
+              (r) =>
+                (r.stops && r.stops.length > 0) ||
+                (r.manifestImages && r.manifestImages.length > 0)
+            );
+
+            if (allAuditedRoutes.length === 0) {
+              return (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center space-y-3">
+                  <FileSpreadsheet className="w-10 h-10 text-slate-600 mx-auto" />
+                  <h4 className="text-sm font-bold text-white">Nenhum romaneio escaneado ainda</h4>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    Assim que o motorista escanear uma folha de romaneio no aplicativo pelo celular ou carregar a rota de Campinas, as imagens físicas em alta resolução e o traçado de entregas ficarão arquivados aqui para você auditar.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-4">
+                {allAuditedRoutes.map((r) => {
+                  const hasCustomImages = r.manifestImages && r.manifestImages.length > 0;
+                  const imagesCount = hasCustomImages ? r.manifestImages!.length : 1;
+
+                  return (
+                    <div
+                      key={r.id}
+                      className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 sm:p-5 shadow-xl transition-all space-y-4"
+                    >
+                      {/* Top Bar of Route */}
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 font-black text-sm">
+                            <Truck className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-sm font-black text-white">
+                                {r.driverName || 'Motorista'}
+                              </h4>
+                              <span className="text-xs text-slate-400 font-mono">
+                                • Placa: {r.vehiclePlate || 'Não informada'}
+                              </span>
+                              <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                                {r.date}
+                              </span>
+                              {r.id === activeRoute.id && (
+                                <span className="text-[10px] bg-amber-500 text-slate-950 font-bold px-2 py-0.5 rounded-full animate-pulse">
+                                  Rota Ativa em Andamento
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              Ponto de Partida: {r.startAddress.split(',')[0]} ➔ Retorno: {r.endAddress.split(',')[0]}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Button to View Scanned Manifest Images */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenManifestViewer(r)}
+                          className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-950 flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
+                        >
+                          <FileSpreadsheet className="w-4 h-4" />
+                          <span>Ver Romaneio Digitalizado ({imagesCount} foto{imagesCount > 1 ? 's' : ''})</span>
+                        </button>
+                      </div>
+
+                      {/* Route Numbers & Metrics */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                            Total Entregas
+                          </span>
+                          <span className="text-base font-black text-white font-mono mt-0.5 block">
+                            {r.stops?.length || 0} paradas
+                          </span>
+                          <span className="text-[10px] text-emerald-400">
+                            {r.stops?.filter((s) => s.status === 'entregue').length || 0} entregues
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                            Carga Total (kg)
+                          </span>
+                          <span className="text-base font-black text-indigo-300 font-mono mt-0.5 block">
+                            {r.totalWeight.toFixed(1)} kg
+                          </span>
+                          <span className="text-[10px] text-slate-500">Peso no baú</span>
+                        </div>
+
+                        <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                            Valor Faturado (R$)
+                          </span>
+                          <span className="text-base font-black text-emerald-400 font-mono mt-0.5 block">
+                            R$ {r.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                          <span className="text-[10px] text-slate-500">Valor das notas fiscais</span>
+                        </div>
+
+                        <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                            Quilometragem (KM)
+                          </span>
+                          <span className="text-base font-black text-amber-400 font-mono mt-0.5 block">
+                            {r.totalKm} km
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Prod: {r.productiveKm} km • Improd: {r.unproductiveKm} km
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Real Odometer Breakdown if calibrated */}
+                      {r.odometerCalculated && (
+                        <div className="bg-slate-950 border border-purple-500/30 rounded-xl p-3 text-xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-purple-400 flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              <span>Apuração de Odômetro do Veículo Calibrada pelo Motorista</span>
+                            </span>
+                            <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-mono font-bold">
+                              KM Real Auditado
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono text-slate-300 pt-1">
+                            <div>🏠 Saída Casa: <strong className="text-white">{r.odometerStartHome || '—'} km</strong></div>
+                            <div>🏢 Chegada CD: <strong className="text-white">{r.odometerStartCompany || '—'} km</strong></div>
+                            <div>🏁 Retorno CD: <strong className="text-white">{r.odometerEndCompany || '—'} km</strong></div>
+                            <div>🏡 Chegada Casa: <strong className="text-white">{r.odometerEndHome || '—'} km</strong></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2029,6 +2239,17 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* MODAL 6: Visualizador de Fotos do Romaneio */}
+      <ManifestViewerModal
+        isOpen={isViewerOpen}
+        onClose={() => setIsViewerOpen(false)}
+        images={viewerImages}
+        title={viewerTitle}
+        driverName={viewerMeta.driverName}
+        vehiclePlate={viewerMeta.vehiclePlate}
+        date={viewerMeta.date}
+      />
     </div>
   );
 };

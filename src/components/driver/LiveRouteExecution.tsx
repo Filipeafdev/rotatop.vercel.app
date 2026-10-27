@@ -13,17 +13,20 @@ import {
   Weight,
   Sparkles,
   Trash2,
+  Calendar,
 } from 'lucide-react';
 
 interface LiveRouteExecutionProps {
   route: Route;
   onFinishEntireRoute?: () => void;
+  onCloseDayRollOver?: () => void;
   onClearRoute?: () => void;
 }
 
 export const LiveRouteExecution: React.FC<LiveRouteExecutionProps> = ({
   route,
   onFinishEntireRoute,
+  onCloseDayRollOver,
   onClearRoute,
 }) => {
   const [showConfirmClear, setShowConfirmClear] = useState(false);
@@ -178,6 +181,32 @@ export const LiveRouteExecution: React.FC<LiveRouteExecutionProps> = ({
           <span className="text-[11px] font-semibold text-slate-300 shrink-0">
             {nextStop.totalWeight} kg • R$ {nextStop.orderValue.toFixed(2)}
           </span>
+        </div>
+      )}
+
+      {/* Partial Day Closure with Roll-Over for Overnight/Remaining Deliveries */}
+      {completedStops > 0 && pendingStops > 0 && onCloseDayRollOver && (
+        <div className="mt-4 p-3.5 rounded-xl bg-slate-950/80 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg shrink-0">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[11px] font-black text-amber-300 uppercase tracking-wider block">
+                Fechamento do Dia com Pernoite de Carga
+              </span>
+              <p className="text-[11px] text-slate-400">
+                Finalizou por hoje? Feche as {completedStops} entregas realizadas hoje (R$ {route.deliveredValue.toFixed(2)}) e mantenha as {pendingStops} paradas restantes para a rota de amanhã sem duplicidade.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onCloseDayRollOver}
+            className="w-full sm:w-auto px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-950 transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+          >
+            <span>Encerrar Dia & Levar {pendingStops} Pendentes p/ Amanhã</span>
+          </button>
         </div>
       )}
 

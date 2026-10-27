@@ -14,7 +14,7 @@ import {
   CompanyBase,
 } from './types';
 import { storage } from './lib/storage';
-import { optimizeRouteStops } from './lib/routeOptimizer';
+import { optimizeRouteStops, calculateRouteMetricsForFixedOrder } from './lib/routeOptimizer';
 import { getCityAnchor } from './lib/geocoding';
 import { Navbar } from './components/Navbar';
 import { RouteMap } from './components/driver/RouteMap';
@@ -28,6 +28,7 @@ import { ManagerDashboard } from './components/manager/ManagerDashboard';
 import { DailyReportView } from './components/reports/DailyReportView';
 import { AuthModal } from './components/auth/AuthModal';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { ManifestViewerModal } from './components/common/ManifestViewerModal';
 import {
   Truck,
   Map as MapIcon,
@@ -41,6 +42,7 @@ import {
   Sparkles,
   Zap,
   Wrench,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export default function App() {
@@ -59,6 +61,7 @@ export default function App() {
   const [driverTab, setDriverTab] = useState<'execucao' | 'mapa' | 'builder' | 'financeiro' | 'relatorios' | 'manutencao'>('execucao');
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isManifestViewerOpen, setIsManifestViewerOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -390,7 +393,7 @@ export default function App() {
   };
 
   // Import stops from OCR
-  const handleImportOcrStops = (draftItems: ManifestItemDraft[]) => {
+  const handleImportOcrStops = (draftItems: ManifestItemDraft[], images?: string[]) => {
     if (draftItems.length === 0) return;
 
     // Detect primary municipality of imported stops
@@ -461,6 +464,7 @@ export default function App() {
       startCoords,
       endAddress,
       endCoords,
+      manifestImages: images && images.length > 0 ? images : activeRoute.manifestImages,
       stops: opt.orderedStops,
       productiveKm: opt.productiveKm,
       unproductiveKm: opt.unproductiveKm,
@@ -475,6 +479,48 @@ export default function App() {
     showToast(`${draftItems.length} paradas de ${detectedCity} importadas e rota otimizada!`);
   };
 
+  // Move stop position up or down in delivery sequence
+  const handleMoveStop = (stopId: string, direction: 'up' | 'down') => {
+    const currentStops = [...activeRoute.stops].sort((a, b) => a.sequenceIndex - b.sequenceIndex);
+    const index = currentStops.findIndex((s) => s.id === stopId);
+    if (index === -1) return;
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= currentStops.length) return;
+
+    // Swap positions
+    const temp = currentStops[index];
+    currentStops[index] = currentStops[targetIndex];
+    currentStops[targetIndex] = temp;
+
+    // Renumber 1..N
+    const reorderedStops = currentStops.map((s, idx) => ({
+      ...s,
+      sequenceIndex: idx + 1,
+    }));
+
+    // Recalculate road distances keeping manual sequence intact
+    const metrics = calculateRouteMetricsForFixedOrder(
+      reorderedStops,
+      activeRoute.startCoords,
+      activeRoute.endCoords,
+      activeRoute.avgKmLiter,
+      activeRoute.fuelPrice
+    );
+
+    const updatedRoute: Route = {
+      ...activeRoute,
+      stops: reorderedStops,
+      productiveKm: metrics.productiveKm,
+      unproductiveKm: metrics.unproductiveKm,
+      totalKm: metrics.totalKm,
+      estimatedFuelCost: metrics.estimatedFuelCost,
+      updatedAt: new Date().toISOString(),
+    };
+
+    handleUpdateRoute(updatedRoute);
+    showToast(`Entrega de ${temp.clientName} movida para parada #${targetIndex + 1}!`);
+  };
+
   // Close entire day route
   const handleFinishEntireRoute = () => {
     const finalizedRoute: Route = {
@@ -485,9 +531,98 @@ export default function App() {
 
     const newHistory = [finalizedRoute, ...historicalRoutes];
     setHistoricalRoutes(newHistory);
-    localStorage.setItem('rotatop_history_routes_v1', JSON.stringify(newHistory));
+    storage.saveHistoricalRoutes(newHistory);
     showToast('Rota do dia concluída e arquivada nos relatórios!');
     setDriverTab('relatorios');
+  };
+
+  // Close today's deliveries into a closed historical route and roll over remaining pending stops to tomorrow
+  const handleCloseDayWithRemainingRollOver = () => {
+    const deliveredStops = activeRoute.stops.filter((s) => s.status === 'entregue');
+    const pendingStops = activeRoute.stops.filter((s) => s.status !== 'entregue');
+
+    if (deliveredStops.length === 0) {
+      showToast('Nenhuma entrega foi finalizada hoje ainda.');
+      return;
+    }
+
+    // 1. Create closed historical route for TODAY containing only delivered stops
+    const todayDeliveredValue = deliveredStops.reduce((sum, s) => sum + (s.orderValue || 0), 0);
+    const todayDeliveredWeight = deliveredStops.reduce((sum, s) => sum + (s.totalWeight || 0), 0);
+
+    const todayClosure: Route = {
+      ...activeRoute,
+      id: `closure-${Date.now()}-${activeRoute.driverId}`,
+      status: 'concluida',
+      stops: deliveredStops,
+      totalValue: todayDeliveredValue,
+      totalWeight: todayDeliveredWeight,
+      deliveredValue: todayDeliveredValue,
+      deliveredWeight: todayDeliveredWeight,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedHistory = [todayClosure, ...historicalRoutes];
+    setHistoricalRoutes(updatedHistory);
+    storage.saveHistoricalRoutes(updatedHistory);
+
+    // 2. Active route rolls over for tomorrow with remaining pending stops
+    if (pendingStops.length > 0) {
+      const tomorrowRemainingValue = pendingStops.reduce((sum, s) => sum + (s.orderValue || 0), 0);
+      const tomorrowRemainingWeight = pendingStops.reduce((sum, s) => sum + (s.totalWeight || 0), 0);
+
+      const reindexedPending = pendingStops.map((s, idx) => ({
+        ...s,
+        sequenceIndex: idx + 1,
+      }));
+
+      // Calculate tomorrow date
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowDateStr = tomorrow.toISOString().split('T')[0];
+
+      // Recalculate metrics for remaining stops
+      const opt = optimizeRouteStops(
+        reindexedPending,
+        activeRoute.startCoords,
+        activeRoute.endCoords,
+        activeRoute.avgKmLiter,
+        activeRoute.fuelPrice
+      );
+
+      const tomorrowRoute: Route = {
+        ...activeRoute,
+        id: `route-${Date.now()}`,
+        parentRouteId: todayClosure.id,
+        date: tomorrowDateStr,
+        status: 'em_andamento',
+        stops: opt.orderedStops,
+        productiveKm: opt.productiveKm,
+        unproductiveKm: opt.unproductiveKm,
+        totalKm: opt.totalKm,
+        estimatedFuelCost: opt.estimatedFuelCost,
+        totalValue: tomorrowRemainingValue,
+        totalWeight: tomorrowRemainingWeight,
+        deliveredValue: 0,
+        deliveredWeight: 0,
+        // Reset odometer readings for tomorrow's new departure
+        odometerStartHome: undefined,
+        odometerStartCompany: undefined,
+        odometerEndCompany: undefined,
+        odometerEndHome: undefined,
+        odometerCalculated: false,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setActiveRoute(tomorrowRoute);
+      storage.saveActiveRoute(tomorrowRoute);
+      showToast(
+        `Fechamento de hoje salvo (${deliveredStops.length} entregas, R$ ${todayDeliveredValue.toFixed(2)})! ${pendingStops.length} entregas transferidas para a rota de amanhã.`
+      );
+    } else {
+      handleClearActiveRoute();
+      showToast('Todas as entregas foram concluídas! Fechamento total arquivado.');
+    }
   };
 
   return (
@@ -604,6 +739,7 @@ export default function App() {
                 <LiveRouteExecution
                   route={activeRoute}
                   onFinishEntireRoute={handleFinishEntireRoute}
+                  onCloseDayRollOver={handleCloseDayWithRemainingRollOver}
                   onClearRoute={handleClearActiveRoute}
                 />
 
@@ -631,17 +767,30 @@ export default function App() {
                         Ordem de Entregas do Romaneio
                       </h3>
                       <p className="text-xs text-slate-400">
-                        {activeRoute.stops.length} pontos de parada ordenados para maior eficiência
+                        {activeRoute.stops.length} pontos de parada ordenados para maior eficiência • Use as setas ↑ ↓ para trocar posições
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => setIsOcrModalOpen(true)}
-                      className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                      <span className="hidden sm:inline">OCR Romaneio</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {activeRoute.manifestImages && activeRoute.manifestImages.length > 0 && (
+                        <button
+                          onClick={() => setIsManifestViewerOpen(true)}
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-xs rounded-xl border border-amber-500/30 flex items-center gap-1.5 transition-all shadow cursor-pointer"
+                          title="Visualizar fotos do romaneio digitalizado"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Ver Romaneio ({activeRoute.manifestImages.length})</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setIsOcrModalOpen(true)}
+                        className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        <span className="hidden sm:inline">OCR Romaneio</span>
+                      </button>
+                    </div>
                   </div>
 
                   {activeRoute.stops.length === 0 ? (
@@ -670,9 +819,11 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {[...activeRoute.stops]
-                        .sort((a, b) => a.sequenceIndex - b.sequenceIndex)
-                        .map((stop, index) => {
+                      {(() => {
+                        const sortedStops = [...activeRoute.stops].sort(
+                          (a, b) => a.sequenceIndex - b.sequenceIndex
+                        );
+                        return sortedStops.map((stop, index) => {
                           const isNextPending =
                             stop.status === 'pendente' &&
                             !activeRoute.stops.some(
@@ -684,13 +835,18 @@ export default function App() {
                               key={stop.id}
                               stop={stop}
                               isCurrentNext={isNextPending}
+                              isFirst={index === 0}
+                              isLast={index === sortedStops.length - 1}
                               onFinish={handleFinishStop}
                               onCancel={handleCancelStop}
                               onReschedule={handleRescheduleStop}
                               onReopen={handleReopenStop}
+                              onMoveUp={(id) => handleMoveStop(id, 'up')}
+                              onMoveDown={(id) => handleMoveStop(id, 'down')}
                             />
                           );
-                        })}
+                        });
+                      })()}
                     </div>
                   )}
                 </div>
@@ -731,6 +887,7 @@ export default function App() {
               <div className="animate-in fade-in">
                 <FinancialSummary
                   route={activeRoute}
+                  onUpdateRoute={handleUpdateRoute}
                   onUpdateParams={(avgKm, price) => {
                     const opt = optimizeRouteStops(
                       activeRoute.stops,
@@ -807,16 +964,25 @@ export default function App() {
             isOpen={isOcrModalOpen}
             onClose={() => setIsOcrModalOpen(false)}
             onImportStops={handleImportOcrStops}
+            historicalRoutes={historicalRoutes}
+            activeRoute={activeRoute}
           />
         )}
 
-        {/* Account & Profile Switcher Modal */}
-        {isAuthModalOpen && (
-          <AuthModal
-            isOpen={isAuthModalOpen}
-            onClose={() => setIsAuthModalOpen(false)}
-            currentUser={currentUser}
-            onSelectUser={handleSelectUser}
+        {/* Manifest Image Lightbox Viewer */}
+        {isManifestViewerOpen && (
+          <ManifestViewerModal
+            isOpen={isManifestViewerOpen}
+            onClose={() => setIsManifestViewerOpen(false)}
+            images={
+              activeRoute.manifestImages && activeRoute.manifestImages.length > 0
+                ? activeRoute.manifestImages
+                : ['/assets/aistudio/image_0f309c5a.png']
+            }
+            title="Romaneio Digitalizado da Rota"
+            driverName={activeRoute.driverName || currentUser.displayName}
+            vehiclePlate={activeRoute.vehiclePlate || currentUser.vehiclePlate}
+            date={activeRoute.date}
           />
         )}
       </div>

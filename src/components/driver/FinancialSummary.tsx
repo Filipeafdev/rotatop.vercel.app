@@ -9,20 +9,91 @@ import {
   MapPin,
   HelpCircle,
   Zap,
+  Home,
+  Building2,
+  Flag,
+  CheckCircle2,
+  Calculator,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface FinancialSummaryProps {
   route: Route;
   onUpdateParams?: (avgKmLiter: number, fuelPrice: number) => void;
+  onUpdateRoute?: (updated: Route) => void;
 }
 
 export const FinancialSummary: React.FC<FinancialSummaryProps> = ({
   route,
   onUpdateParams,
+  onUpdateRoute,
 }) => {
   const [isEditingParams, setIsEditingParams] = useState(false);
   const [customAvgKm, setCustomAvgKm] = useState(route.avgKmLiter.toString());
   const [customFuelPrice, setCustomFuelPrice] = useState(route.fuelPrice.toString());
+
+  // Real Odometer Inputs (Saída de Casa -> CD Empresa -> Retorno CD -> Chegada em Casa)
+  const [odoStartHome, setOdoStartHome] = useState(route.odometerStartHome?.toString() || '');
+  const [odoStartCompany, setOdoStartCompany] = useState(route.odometerStartCompany?.toString() || '');
+  const [odoEndCompany, setOdoEndCompany] = useState(route.odometerEndCompany?.toString() || '');
+  const [odoEndHome, setOdoEndHome] = useState(route.odometerEndHome?.toString() || '');
+  const [odoSavedSuccess, setOdoSavedSuccess] = useState(false);
+
+  // Parse Odometer Numbers
+  const nOdoStartHome = parseFloat(odoStartHome) || 0;
+  const nOdoStartCompany = parseFloat(odoStartCompany) || 0;
+  const nOdoEndCompany = parseFloat(odoEndCompany) || 0;
+  const nOdoEndHome = parseFloat(odoEndHome) || 0;
+
+  // Real-time calculation of legs based on odometers
+  const morningUnprod =
+    nOdoStartCompany > nOdoStartHome && nOdoStartHome > 0
+      ? Number((nOdoStartCompany - nOdoStartHome).toFixed(1))
+      : 0;
+
+  const deliveriesProd =
+    nOdoEndCompany > nOdoStartCompany && nOdoStartCompany > 0
+      ? Number((nOdoEndCompany - nOdoStartCompany).toFixed(1))
+      : 0;
+
+  const eveningUnprod =
+    nOdoEndHome > nOdoEndCompany && nOdoEndCompany > 0
+      ? Number((nOdoEndHome - nOdoEndCompany).toFixed(1))
+      : 0;
+
+  const totalOdoUnproductive = Number((morningUnprod + eveningUnprod).toFixed(1));
+  const totalOdoKm =
+    nOdoEndHome > nOdoStartHome && nOdoStartHome > 0
+      ? Number((nOdoEndHome - nOdoStartHome).toFixed(1))
+      : Number((deliveriesProd + totalOdoUnproductive).toFixed(1));
+
+  const handleSaveOdometer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onUpdateRoute) return;
+
+    const finalProd = deliveriesProd > 0 ? deliveriesProd : route.productiveKm;
+    const finalUnprod = totalOdoUnproductive > 0 ? totalOdoUnproductive : route.unproductiveKm;
+    const finalTotal = totalOdoKm > 0 ? totalOdoKm : finalProd + finalUnprod;
+    const validAvg = route.avgKmLiter > 0 ? route.avgKmLiter : 8.5;
+    const fuelCost = Number(((finalTotal / validAvg) * route.fuelPrice).toFixed(2));
+
+    onUpdateRoute({
+      ...route,
+      odometerStartHome: nOdoStartHome || undefined,
+      odometerStartCompany: nOdoStartCompany || undefined,
+      odometerEndCompany: nOdoEndCompany || undefined,
+      odometerEndHome: nOdoEndHome || undefined,
+      odometerCalculated: true,
+      productiveKm: finalProd,
+      unproductiveKm: finalUnprod,
+      totalKm: finalTotal,
+      estimatedFuelCost: fuelCost,
+      updatedAt: new Date().toISOString(),
+    });
+
+    setOdoSavedSuccess(true);
+    setTimeout(() => setOdoSavedSuccess(false), 3000);
+  };
 
   const handleSaveParams = () => {
     const kmL = parseFloat(customAvgKm) || 8.5;
@@ -235,6 +306,206 @@ export const FinancialSummary: React.FC<FinancialSummaryProps> = ({
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Real Odometer Calibration Section */}
+      <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 sm:p-5 mt-5 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-purple-500/10 border border-purple-500/30 rounded-xl text-purple-400">
+              <Calculator className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-black text-white uppercase tracking-wider">
+                  Apuração de Odômetro Real (Saída de Casa ➔ Empresa ➔ Retorno Casa)
+                </h4>
+                {route.odometerCalculated && (
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3" />
+                    Calibrado via Odômetro
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Digite os números do painel do seu veículo para calcular exatamente a KM improdutiva de deslocamento e a KM produtiva de carga.
+              </p>
+            </div>
+          </div>
+
+          {odoSavedSuccess && (
+            <div className="text-xs font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-3 py-1.5 rounded-xl flex items-center gap-1.5 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Odômetro Calibrado com Sucesso!</span>
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleSaveOdometer} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Step 1: Saída de Casa */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 focus-within:border-purple-500 transition-colors">
+              <label className="block text-[11px] font-bold text-purple-400 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Home className="w-3.5 h-3.5" />
+                  1. Saída de Casa (Manhã)
+                </span>
+                <span className="text-[10px] text-slate-500">Início</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={odoStartHome}
+                  onChange={(e) => setOdoStartHome(e.target.value)}
+                  placeholder="Ex: 104200"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg py-1.5 px-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-purple-500 pr-9"
+                />
+                <span className="absolute right-2.5 top-1.5 text-[10px] text-slate-500 font-bold">
+                  km
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">Ao ligar o veículo para ir ao galpão</p>
+            </div>
+
+            {/* Step 2: Chegada Empresa / Saída p/ Entregas */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 focus-within:border-emerald-500 transition-colors">
+              <label className="block text-[11px] font-bold text-emerald-400 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5" />
+                  2. Chegada no CD / Início
+                </span>
+                <span className="text-[10px] text-slate-500">Carga</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={odoStartCompany}
+                  onChange={(e) => setOdoStartCompany(e.target.value)}
+                  placeholder="Ex: 104218"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg py-1.5 px-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-emerald-500 pr-9"
+                />
+                <span className="absolute right-2.5 top-1.5 text-[10px] text-slate-500 font-bold">
+                  km
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">Ao carregar e sair para entregar</p>
+            </div>
+
+            {/* Step 3: Fim Entregas / Retorno CD */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 focus-within:border-blue-500 transition-colors">
+              <label className="block text-[11px] font-bold text-blue-400 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Flag className="w-3.5 h-3.5" />
+                  3. Fim Entregas / Retorno CD
+                </span>
+                <span className="text-[10px] text-slate-500">Descarga</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={odoEndCompany}
+                  onChange={(e) => setOdoEndCompany(e.target.value)}
+                  placeholder="Ex: 104285"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg py-1.5 px-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-blue-500 pr-9"
+                />
+                <span className="absolute right-2.5 top-1.5 text-[10px] text-slate-500 font-bold">
+                  km
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">Ao retornar à base vazia</p>
+            </div>
+
+            {/* Step 4: Chegada em Casa */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 focus-within:border-purple-500 transition-colors">
+              <label className="block text-[11px] font-bold text-purple-400 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Home className="w-3.5 h-3.5" />
+                  4. Chegada em Casa (Noite)
+                </span>
+                <span className="text-[10px] text-slate-500">Fim</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={odoEndHome}
+                  onChange={(e) => setOdoEndHome(e.target.value)}
+                  placeholder="Ex: 104305"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg py-1.5 px-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-purple-500 pr-9"
+                />
+                <span className="absolute right-2.5 top-1.5 text-[10px] text-slate-500 font-bold">
+                  km
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">Ao estacionar na garagem de casa</p>
+            </div>
+          </div>
+
+          {/* Real-Time Live Computed Metrics Strip */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="bg-slate-950/70 p-2.5 rounded-lg border border-purple-500/20">
+              <span className="text-[10px] text-purple-400 font-bold block uppercase tracking-wider">
+                🚗 Improdutivo Manhã
+              </span>
+              <span className="text-sm font-black text-white font-mono mt-0.5 block">
+                {morningUnprod > 0 ? `${morningUnprod} km` : '—'}
+              </span>
+              <span className="text-[9px] text-slate-500">Casa ➔ Empresa</span>
+            </div>
+
+            <div className="bg-slate-950/70 p-2.5 rounded-lg border border-blue-500/20">
+              <span className="text-[10px] text-blue-400 font-bold block uppercase tracking-wider">
+                📦 Produtivo (Entregas)
+              </span>
+              <span className="text-sm font-black text-blue-400 font-mono mt-0.5 block">
+                {deliveriesProd > 0 ? `${deliveriesProd} km` : `${route.productiveKm} km (est.)`}
+              </span>
+              <span className="text-[9px] text-slate-500">Com carga no baú</span>
+            </div>
+
+            <div className="bg-slate-950/70 p-2.5 rounded-lg border border-purple-500/20">
+              <span className="text-[10px] text-purple-400 font-bold block uppercase tracking-wider">
+                🚗 Improdutivo Volta
+              </span>
+              <span className="text-sm font-black text-white font-mono mt-0.5 block">
+                {eveningUnprod > 0 ? `${eveningUnprod} km` : '—'}
+              </span>
+              <span className="text-[9px] text-slate-500">Empresa ➔ Casa</span>
+            </div>
+
+            <div className="bg-slate-950/70 p-2.5 rounded-lg border border-amber-500/30">
+              <span className="text-[10px] text-amber-400 font-bold block uppercase tracking-wider">
+                ⛽ KM Total Apurado
+              </span>
+              <span className="text-sm font-black text-amber-400 font-mono mt-0.5 block">
+                {totalOdoKm > 0 ? `${totalOdoKm} km` : `${route.totalKm} km`}
+              </span>
+              <span className="text-[9px] text-slate-500">Total rodado no dia</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+            <p className="text-[11px] text-slate-400">
+              💡 <strong>Regra de Ouro:</strong> O apontamento manual do odômetro do veículo é a forma mais justa de compensação para a frota, pois audita o trajeto real sem depender apenas do sinal de GPS.
+            </p>
+
+            <button
+              type="submit"
+              disabled={!onUpdateRoute}
+              className="w-full sm:w-auto px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs rounded-xl shadow-lg shadow-purple-950 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Gravar e Calibrar Rota com Odômetro</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

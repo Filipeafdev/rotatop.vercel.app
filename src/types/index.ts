@@ -112,6 +112,9 @@ export interface Stop {
   isPriority: boolean; // "Primeira Entrega"
   paymentMethod: PaymentMethod;
   notes?: string;
+  orderNumber?: string; // Pedido ou Nota Fiscal
+  hasSignature?: boolean; // Se foi detectada assinatura física no romaneio de papel
+  alreadyDelivered?: boolean; // Se foi dado como entregue em fechamento prévio
   status: StopStatus;
   cancelReason?: string;
   deliveredAt?: string;
@@ -140,6 +143,13 @@ export interface Route {
   deliveredWeight: number;
   deliveredValue: number;
   stops: Stop[];
+  manifestImages?: string[]; // Scanned manifest photos/pages
+  odometerStartHome?: number; // Km ao sair de casa pela manhã
+  odometerStartCompany?: number; // Km ao chegar na empresa / sair para entregas
+  odometerEndCompany?: number; // Km ao retornar para empresa / finalizar entregas
+  odometerEndHome?: number; // Km ao chegar de volta em casa
+  odometerCalculated?: boolean; // Flag if KM was calibrated via real odometer
+  parentRouteId?: string; // Se continuou de um romaneio anterior
   deletionRequestId?: string;
   deletionReason?: string;
   createdAt: string;
@@ -158,6 +168,7 @@ export interface AddressSuggestion {
 
 export interface ManifestItemDraft {
   id: string;
+  orderNumber?: string;
   clientName: string;
   address: string;
   city?: string;
@@ -169,6 +180,9 @@ export interface ManifestItemDraft {
   isPriority: boolean;
   paymentMethod: PaymentMethod;
   notes?: string;
+  hasSignature?: boolean;
+  alreadyDelivered?: boolean;
+  signatureNotes?: string;
 }
 
 export type TimeFilter = 'dia' | 'semana' | 'mes' | 'ano';

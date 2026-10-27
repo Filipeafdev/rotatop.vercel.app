@@ -150,23 +150,49 @@ app.get('/api/maps/geocode', async (req: Request, res: Response) => {
   }
 });
 
-// 3. OCR Romaneio Gemini AI Endpoint with Fallback Chain & Clean JSON Extraction
+// 3. OCR Romaneio Gemini AI Endpoint with Fallback Chain, Multi-Image Support & Clean JSON Extraction
 app.post('/api/ocr-romaneio', async (req: Request, res: Response) => {
   try {
-    const { imageBase64, mimeType } = req.body || {};
+    const { imageBase64, mimeType, images, imagesBase64 } = req.body || {};
 
-    if (!imageBase64) {
+    const inputImages: Array<{ data: string; mimeType: string }> = [];
+
+    if (Array.isArray(images) && images.length > 0) {
+      images.forEach((img: any) => {
+        const raw = typeof img === 'string' ? img : img.imageBase64 || img.data || img.url;
+        if (raw) {
+          inputImages.push({
+            data: raw.replace(/^data:[^;]+;base64,/, ''),
+            mimeType: img.mimeType || 'image/jpeg',
+          });
+        }
+      });
+    } else if (Array.isArray(imagesBase64) && imagesBase64.length > 0) {
+      imagesBase64.forEach((b64: string) => {
+        if (b64) {
+          inputImages.push({
+            data: b64.replace(/^data:[^;]+;base64,/, ''),
+            mimeType: 'image/jpeg',
+          });
+        }
+      });
+    } else if (imageBase64) {
+      inputImages.push({
+        data: imageBase64.replace(/^data:[^;]+;base64,/, ''),
+        mimeType: mimeType || 'image/jpeg',
+      });
+    }
+
+    if (inputImages.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Nenhuma imagem foi recebida pelo servidor.',
       });
     }
 
-    const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
-    const cleanMime = mimeType || 'image/jpeg';
-
     const prompt = `Você é um leitor óptico especialista em romaneios e planilhas de transporte e logística no Brasil.
-Analise a imagem da tabela com extrema atenção ao alinhamento horizontal linha por linha.
+Você recebeu ${inputImages.length} imagem(ns)/página(s) de um romaneio de carga ou entregas.
+Analise todas as imagens com extrema atenção ao alinhamento horizontal linha por linha, concatenando todas as paradas encontradas sem duplicar cabeçalhos.
 
 Mapeamento exato das colunas da tabela:
 - P_Ped: Identificador do fornecedor
@@ -192,8 +218,15 @@ REGRAS CRÍTICAS DE EXTRAÇÃO:
 3. Extraia o município da coluna 'Cidades' para o campo "city" (ex: "Campinas").
 4. Monte o campo "address" completo: "[Endereço], [Bairros], [Cidades] - SP, Brasil".
 5. Extraia para "notes" a condição de pagamento e o número do pedido (ex: "Boleto 21 Dias - Pedido 6540297").
+6. Extraia para "orderNumber" o número do pedido ou nota fiscal (ex: "6540297").
+7. DETECÇÃO DE ENTREGAS JÁ REALIZADAS / ASSINADAS NO PAPEL:
+   - Inspecione a coluna de assinatura/recebedor ou a margem da linha.
+   - Se houver qualquer assinatura à mão, rubrica de caneta, visto (✓), carimbo, anotação manual de data ou "OK", defina "hasSignature": true e descreva em "signatureNotes" (ex: "Assinatura de recebedor detectada").
+   - Caso a linha esteja limpa/em branco sem assinatura manual, defina "hasSignature": false e "signatureNotes": "".
+8. Se houver mais de uma página/foto, consolide todas as paradas em uma única lista sequencial sem duplicar.
 
 Retorne ESTRITAMENTE um array JSON contendo os objetos com os campos:
+- orderNumber: string
 - clientName: string
 - city: string
 - address: string
@@ -201,8 +234,21 @@ Retorne ESTRITAMENTE um array JSON contendo os objetos com os campos:
 - totalWeight: number (float decimal)
 - paymentMethod: 'a_prazo' se Boleto/A Prazo/Faturado; 'a_vista' se Dinheiro/À Vista/PIX
 - notes: string
+- hasSignature: boolean
+- signatureNotes: string
 
 Não inclua nenhum texto antes ou depois do JSON.`;
+
+    // Construct multimodal content parts with all images
+    const contentParts: any[] = [{ text: prompt }];
+    inputImages.forEach((img) => {
+      contentParts.push({
+        inlineData: {
+          mimeType: img.mimeType,
+          data: img.data,
+        },
+      });
+    });
 
     // Model pool using valid @google/genai models
     const modelPool = [
@@ -216,21 +262,13 @@ Não inclua nenhum texto antes ou depois do JSON.`;
 
     for (const modelName of modelPool) {
       try {
-        console.log(`[OCR] Trying model: ${modelName}`);
+        console.log(`[OCR] Trying model: ${modelName} with ${inputImages.length} image(s)`);
         const response = await ai.models.generateContent({
           model: modelName,
           contents: [
             {
               role: 'user',
-              parts: [
-                { text: prompt },
-                {
-                  inlineData: {
-                    mimeType: cleanMime,
-                    data: cleanBase64,
-                  },
-                },
-              ],
+              parts: contentParts,
             },
           ],
           config: {

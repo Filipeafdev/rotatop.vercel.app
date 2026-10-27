@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ManifestItemDraft } from '../../types';
+import { ManifestItemDraft, Route } from '../../types';
 import { searchAddressBR, geocodeAddressDirectly, getCityAnchor } from '../../lib/geocoding';
 import {
   Camera,
@@ -21,12 +21,17 @@ import {
   MapPin,
   TrendingUp,
   PackageCheck,
+  CheckSquare,
+  Square,
+  PenTool,
 } from 'lucide-react';
 
 interface OcrManifestModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImportStops: (items: ManifestItemDraft[]) => void;
+  onImportStops: (items: ManifestItemDraft[], images?: string[]) => void;
+  historicalRoutes?: Route[];
+  activeRoute?: Route;
 }
 
 // Real 17 deliveries extracted with exact line-by-line alignment from user's attached Campinas sheet
@@ -324,15 +329,64 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
   isOpen,
   onClose,
   onImportStops,
+  historicalRoutes,
+  activeRoute,
 }) => {
   // All hooks MUST be declared unconditionally at the top level
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [capturedImages, setCapturedImages] = useState<Array<{ id: string; url: string; name: string }>>([]);
+  const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedItems, setExtractedItems] = useState<ManifestItemDraft[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [filterMode, setFilterMode] = useState<'todas' | 'pendentes' | 'assinadas'>('todas');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showImagePreviewInTable, setShowImagePreviewInTable] = useState(false);
   const [geocodingStatus, setGeocodingStatus] = useState<string | null>(null);
+
+  // Helper: Detect if order was already delivered in previous closures
+  const isDeliveredInHistory = (item: ManifestItemDraft) => {
+    if (!historicalRoutes || historicalRoutes.length === 0) return false;
+    return historicalRoutes.some((r) =>
+      r.stops?.some(
+        (s) =>
+          s.status === 'entregue' &&
+          ((item.orderNumber && s.orderNumber && item.orderNumber === s.orderNumber) ||
+            (item.clientName &&
+              s.clientName &&
+              item.clientName.trim().toLowerCase() === s.clientName.trim().toLowerCase()))
+      )
+    );
+  };
+
+  // Helper: Apply smart selection logic (unselecting already signed / delivered items by default)
+  const updateItemsWithSmartSelection = (items: ManifestItemDraft[]) => {
+    const enriched = items.map((it) => {
+      const alreadyDelivered = isDeliveredInHistory(it);
+      return {
+        ...it,
+        alreadyDelivered: it.alreadyDelivered || alreadyDelivered,
+      };
+    });
+
+    setExtractedItems(enriched);
+
+    // Initial default: select only pending items (NOT signed and NOT already delivered)
+    const initialSelected = new Set<string>();
+    enriched.forEach((it) => {
+      if (!it.hasSignature && !it.alreadyDelivered) {
+        initialSelected.add(it.id);
+      }
+    });
+
+    // If all are signed or none are signed, default to selecting all
+    if (initialSelected.size === 0 && enriched.length > 0) {
+      enriched.forEach((it) => initialSelected.add(it.id));
+    }
+
+    setSelectedItemIds(initialSelected);
+  };
+
+  const previewUrl = capturedImages[activeImageIndex]?.url || null;
 
   // Paste text mode
   const [showPasteMode, setShowPasteMode] = useState(false);
@@ -357,21 +411,42 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
   // Early return only AFTER all hooks are defined
   if (!isOpen) return null;
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      setErrorMessage(null);
-      setShowPasteMode(false);
+  const handleAddFiles = async (files: FileList | File[]) => {
+    if (!files || files.length === 0) return;
+    setIsProcessing(true);
+    setErrorMessage(null);
+    setShowPasteMode(false);
 
-      try {
+    try {
+      const newItems: Array<{ id: string; url: string; name: string }> = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         const compressed = await compressImageClient(file);
-        setPreviewUrl(compressed);
-      } catch {
-        const reader = new FileReader();
-        reader.onload = () => setPreviewUrl(reader.result as string);
-        reader.readAsDataURL(file);
+        newItems.push({
+          id: `img-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+          url: compressed,
+          name: file.name || `Foto ${capturedImages.length + i + 1}`,
+        });
       }
+      setCapturedImages((prev) => {
+        const updated = [...prev, ...newItems];
+        if (prev.length === 0 && updated.length > 0) {
+          setActiveImageIndex(0);
+        }
+        return updated;
+      });
+      setShowImagePreviewInTable(true);
+    } catch {
+      setErrorMessage('Erro ao comprimir fotos do romaneio.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      await handleAddFiles(e.target.files);
+      e.target.value = '';
     }
   };
 
@@ -384,7 +459,16 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
       const blob = await res.blob();
       const reader = new FileReader();
       reader.onload = () => {
-        setPreviewUrl(reader.result as string);
+        const url = reader.result as string;
+        setCapturedImages((prev) => [
+          ...prev,
+          {
+            id: `sample-${Date.now()}`,
+            url,
+            name: 'Romaneio Campinas (17 paradas)',
+          },
+        ]);
+        setActiveImageIndex(0);
         setIsProcessing(false);
       };
       reader.readAsDataURL(blob);
@@ -395,7 +479,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
   };
 
   const processImageWithOcr = async () => {
-    if (!previewUrl) return;
+    if (capturedImages.length === 0) return;
 
     setIsProcessing(true);
     setErrorMessage(null);
@@ -408,8 +492,10 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
           'Accept': 'application/json',
         },
         body: JSON.stringify({
-          imageBase64: previewUrl,
-          mimeType: 'image/jpeg',
+          images: capturedImages.map((img) => ({
+            imageBase64: img.url,
+            mimeType: 'image/jpeg',
+          })),
         }),
       });
 
@@ -433,7 +519,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
 
       // Check if server directly parsed items
       if (Array.isArray(result.items) && result.items.length > 0) {
-        setExtractedItems(result.items);
+        updateItemsWithSmartSelection(result.items);
         setShowImagePreviewInTable(true);
         return;
       }
@@ -460,18 +546,29 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
         );
       }
 
-      const formatted: ManifestItemDraft[] = parsed.map((item: any, idx: number) => ({
-        id: `ocr-item-${Date.now()}-${idx}`,
-        clientName: item.clientName || `Cliente ${idx + 1}`,
-        address: item.address || 'Campinas - SP',
-        orderValue: Number(item.orderValue) || 0,
-        totalWeight: Number(item.totalWeight) || 0,
-        isPriority: Boolean(item.isPriority || idx === 0),
-        paymentMethod: item.paymentMethod === 'a_prazo' ? 'a_prazo' : 'a_vista',
-        notes: item.notes || '',
-      }));
+      const formatted: ManifestItemDraft[] = parsed.map((item: any, idx: number) => {
+        const orderNum =
+          item.orderNumber ||
+          (item.notes?.match(/Pedido\s*(\d+)/i)?.[1]) ||
+          '';
 
-      setExtractedItems(formatted);
+        return {
+          id: `ocr-item-${Date.now()}-${idx}`,
+          orderNumber: orderNum,
+          clientName: item.clientName || `Cliente ${idx + 1}`,
+          city: item.city || 'Campinas',
+          address: item.address || 'Campinas - SP',
+          orderValue: Number(item.orderValue) || 0,
+          totalWeight: Number(item.totalWeight) || 0,
+          isPriority: Boolean(item.isPriority || idx === 0),
+          paymentMethod: item.paymentMethod === 'a_prazo' ? 'a_prazo' : 'a_vista',
+          notes: item.notes || '',
+          hasSignature: Boolean(item.hasSignature),
+          signatureNotes: item.signatureNotes || '',
+        };
+      });
+
+      updateItemsWithSmartSelection(formatted);
       setShowImagePreviewInTable(true);
     } catch (err: any) {
       console.error('OCR processing error:', err);
@@ -560,17 +657,25 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
   };
 
   const handleConfirmImport = async () => {
-    if (extractedItems.length === 0) return;
+    const itemsToImport = extractedItems.filter((item) => selectedItemIds.has(item.id));
+    if (itemsToImport.length === 0) {
+      setErrorMessage(
+        'Nenhuma entrega foi selecionada. Marque ao menos uma caixa de seleção das paradas para gerar a rota.'
+      );
+      return;
+    }
 
     setIsProcessing(true);
     const resolvedItems: ManifestItemDraft[] = [];
 
-    for (let i = 0; i < extractedItems.length; i++) {
-      const item = extractedItems[i];
+    for (let i = 0; i < itemsToImport.length; i++) {
+      const item = itemsToImport[i];
       if (!item.address.trim()) continue;
 
       const cityName = item.city || 'Campinas';
-      setGeocodingStatus(`Localizando parada ${i + 1} de ${extractedItems.length}: ${item.clientName} em ${cityName}...`);
+      setGeocodingStatus(
+        `Localizando parada ${i + 1} de ${itemsToImport.length}: ${item.clientName} em ${cityName}...`
+      );
 
       try {
         const geo = await geocodeAddressDirectly(item.address, cityName);
@@ -602,7 +707,11 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
 
     setGeocodingStatus(null);
     setIsProcessing(false);
-    onImportStops(resolvedItems);
+    const imagesToPass =
+      capturedImages.length > 0
+        ? capturedImages.map((img) => img.url)
+        : ['/assets/aistudio/image_0f309c5a.png'];
+    onImportStops(resolvedItems, imagesToPass);
     onClose();
   };
 
@@ -641,11 +750,12 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
           </button>
         </div>
 
-        {/* Hidden inputs */}
+        {/* Hidden inputs supporting multiple photos */}
         <input
           ref={galleryInputRef}
           type="file"
           accept="image/*"
+          multiple
           onChange={handleFileChange}
           className="hidden"
         />
@@ -718,40 +828,90 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
         {/* SCREEN 1: UPLOAD / CAMERA SELECTION */}
         {extractedItems.length === 0 && !showPasteMode && (
           <div>
-            {previewUrl ? (
-              <div className="border border-slate-700 bg-slate-950 rounded-2xl p-4 text-center mb-4">
-                <div className="relative inline-block max-w-full">
-                  <img
-                    src={previewUrl}
-                    alt="Romaneio selecionado"
-                    className="max-h-64 sm:max-h-72 rounded-xl object-contain mx-auto border border-slate-800 shadow-xl mb-3"
-                  />
-                  <div className="absolute top-2 right-2 bg-slate-900/90 text-white text-[10px] px-2 py-1 rounded-md border border-slate-700 font-semibold">
-                    Imagem Pronta para OCR
+            {capturedImages.length > 0 ? (
+              <div className="border border-slate-700 bg-slate-950 rounded-2xl p-4 mb-4 space-y-3">
+                {/* Thumbnails strip for multiple photos */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <Camera className="w-4 h-4 text-emerald-400" />
+                      <span>Fotos do Romaneio ({capturedImages.length} foto{capturedImages.length > 1 ? 's' : ''})</span>
+                    </span>
+                    <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded font-bold">
+                      Página {activeImageIndex + 1} de {capturedImages.length}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="flex-1 sm:flex-initial px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-300 rounded-lg border border-slate-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>+ Tirar Outra Foto</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => galleryInputRef.current?.click()}
+                      className="flex-1 sm:flex-initial px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-blue-300 rounded-lg border border-slate-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Mais da Galeria</span>
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-center gap-2 mb-4">
-                  <button
-                    type="button"
-                    onClick={() => galleryInputRef.current?.click()}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all"
-                  >
-                    <FolderOpen className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Trocar da Galeria</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all"
-                  >
-                    <Camera className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Tirar Outra Foto</span>
-                  </button>
+                {/* Thumbnails carousel */}
+                <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none">
+                  {capturedImages.map((img, idx) => (
+                    <div
+                      key={img.id}
+                      onClick={() => setActiveImageIndex(idx)}
+                      className={`relative rounded-xl overflow-hidden border-2 transition-all shrink-0 cursor-pointer group ${
+                        activeImageIndex === idx
+                          ? 'border-blue-500 ring-2 ring-blue-500/40 scale-105'
+                          : 'border-slate-800 opacity-65 hover:opacity-100'
+                      }`}
+                    >
+                      <img src={img.url} alt={img.name} className="w-20 h-16 object-cover" />
+                      <div className="absolute top-1 left-1 bg-slate-900/90 text-[9px] font-bold text-white px-1.5 py-0.5 rounded">
+                        Pág. {idx + 1}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCapturedImages((prev) => prev.filter((p) => p.id !== img.id));
+                          if (activeImageIndex >= capturedImages.length - 1) {
+                            setActiveImageIndex(Math.max(0, capturedImages.length - 2));
+                          }
+                        }}
+                        className="absolute top-1 right-1 p-1 bg-rose-600/90 hover:bg-rose-500 text-white rounded-md transition-opacity"
+                        title="Remover foto"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5">
+                {/* Main Preview for Active Photo */}
+                {previewUrl && (
+                  <div className="relative text-center bg-slate-900/50 rounded-xl p-3 border border-slate-800">
+                    <img
+                      src={previewUrl}
+                      alt={`Foto #${activeImageIndex + 1}`}
+                      className="max-h-64 sm:max-h-72 rounded-xl object-contain mx-auto border border-slate-800 shadow-xl"
+                    />
+                    <div className="mt-2 text-[11px] text-slate-400 font-medium">
+                      Visualizando Foto #{activeImageIndex + 1} de {capturedImages.length} — {capturedImages[activeImageIndex]?.name}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
                   <button
                     onClick={processImageWithOcr}
                     disabled={isProcessing}
@@ -760,12 +920,12 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                     {isProcessing ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        <span>Extraindo paradas da imagem com IA...</span>
+                        <span>Extraindo paradas de {capturedImages.length} foto(s) com IA...</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-5 h-5 text-amber-300" />
-                        <span>Extrair Dados Desta Imagem com IA</span>
+                        <span>Extrair Dados de {capturedImages.length} Foto(s) com IA</span>
                       </>
                     )}
                   </button>
@@ -773,6 +933,11 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      setCapturedImages((prev) =>
+                        prev.length > 0
+                          ? prev
+                          : [{ id: 'sample-campinas', url: '/assets/aistudio/image_0f309c5a.png', name: 'Romaneio Campinas' }]
+                      );
                       setExtractedItems(CAMPINAS_ATTACHED_SHEET_ITEMS);
                       setShowImagePreviewInTable(true);
                       setErrorMessage(null);
@@ -906,7 +1071,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                     type="button"
                     onClick={() => {
                       setExtractedItems(preset.items);
-                      setPreviewUrl(null);
+                      setCapturedImages([]);
                       setErrorMessage(null);
                     }}
                     className="p-3 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 rounded-xl text-left text-xs transition-all flex items-center justify-between group"
@@ -975,13 +1140,52 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
           </div>
         )}
 
-        {/* SCREEN 3: EDITABLE EXTRACTED ITEMS TABLE WITH PHOTO COMPARISON */}
+        {/* SCREEN 3: EDITABLE EXTRACTED ITEMS TABLE WITH SMART SELECTION & SIGNATURE DETECTION */}
         {extractedItems.length > 0 && (() => {
           const totalVal = extractedItems.reduce((acc, it) => acc + (Number(it.orderValue) || 0), 0);
           const totalKg = extractedItems.reduce((acc, it) => acc + (Number(it.totalWeight) || 0), 0);
           const detectedCities = Array.from(
             new Set(extractedItems.map((it) => it.city || 'Campinas').filter(Boolean))
           );
+
+          const selectedItems = extractedItems.filter((it) => selectedItemIds.has(it.id));
+          const selectedVal = selectedItems.reduce((acc, it) => acc + (Number(it.orderValue) || 0), 0);
+          const selectedKg = selectedItems.reduce((acc, it) => acc + (Number(it.totalWeight) || 0), 0);
+
+          const signedCount = extractedItems.filter((it) => it.hasSignature || it.alreadyDelivered).length;
+          const pendingCount = extractedItems.length - signedCount;
+
+          const itemsToDisplay = extractedItems.filter((item) => {
+            const isDone = item.hasSignature || item.alreadyDelivered;
+            if (filterMode === 'pendentes') return !isDone;
+            if (filterMode === 'assinadas') return isDone;
+            return true;
+          });
+
+          const handleSelectOnlyPending = () => {
+            const next = new Set<string>();
+            extractedItems.forEach((it) => {
+              if (!it.hasSignature && !it.alreadyDelivered) next.add(it.id);
+            });
+            setSelectedItemIds(next);
+          };
+
+          const handleSelectAll = () => {
+            const next = new Set<string>();
+            extractedItems.forEach((it) => next.add(it.id));
+            setSelectedItemIds(next);
+          };
+
+          const handleDeselectAll = () => {
+            setSelectedItemIds(new Set());
+          };
+
+          const toggleItemSelection = (id: string) => {
+            const next = new Set(selectedItemIds);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            setSelectedItemIds(next);
+          };
 
           return (
             <div>
@@ -992,8 +1196,10 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                     <Check className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-400 font-medium block">Total Entregas</span>
-                    <span className="text-sm font-black text-emerald-400">{extractedItems.length} paradas</span>
+                    <span className="text-[10px] text-slate-400 font-medium block">Selecionadas p/ Rota</span>
+                    <span className="text-sm font-black text-emerald-400">
+                      {selectedItems.length} de {extractedItems.length}
+                    </span>
                   </div>
                 </div>
 
@@ -1002,9 +1208,9 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                     <TrendingUp className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-400 font-medium block">Valor Romaneio</span>
+                    <span className="text-[10px] text-slate-400 font-medium block">Valor Selecionado</span>
                     <span className="text-sm font-black text-blue-400">
-                      R$ {totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R$ {selectedVal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
@@ -1014,30 +1220,98 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                     <PackageCheck className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-400 font-medium block">Peso Total</span>
+                    <span className="text-[10px] text-slate-400 font-medium block">Peso Selecionado</span>
                     <span className="text-sm font-black text-indigo-300">
-                      {totalKg.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg
+                      {selectedKg.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg
                     </span>
                   </div>
                 </div>
 
                 <div className="bg-slate-950/80 border border-amber-500/30 rounded-2xl p-2.5 flex items-center gap-2">
                   <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
-                    <MapPin className="w-4 h-4" />
+                    <PenTool className="w-4 h-4" />
                   </div>
                   <div className="overflow-hidden">
-                    <span className="text-[10px] text-slate-400 font-medium block">Municípios</span>
-                    <span className="text-xs font-bold text-amber-300 truncate block" title={detectedCities.join(', ')}>
-                      {detectedCities.join(', ')}
+                    <span className="text-[10px] text-slate-400 font-medium block">Já Assinadas / Fechadas</span>
+                    <span className="text-xs font-bold text-amber-300 truncate block">
+                      {signedCount} no papel ({pendingCount} pendentes)
                     </span>
                   </div>
+                </div>
+              </div>
+
+              {/* Smart Multi-Select & Filter Bar */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 mb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-bold text-slate-400 mr-1">Filtrar:</span>
+                  <button
+                    type="button"
+                    onClick={() => setFilterMode('todas')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      filterMode === 'todas'
+                        ? 'bg-blue-600 text-white shadow'
+                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    Todas ({extractedItems.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterMode('pendentes')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      filterMode === 'pendentes'
+                        ? 'bg-emerald-600 text-white shadow'
+                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    🟢 Pendentes ({pendingCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterMode('assinadas')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      filterMode === 'assinadas'
+                        ? 'bg-amber-600 text-white shadow'
+                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    ✍️ Já Assinadas ({signedCount})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleSelectOnlyPending}
+                    className="px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-bold rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                    title="Seleciona apenas as entregas sem assinatura e sem fechamento anterior"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    <span>Selecionar Apenas Pendentes</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSelectAll}
+                    className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-bold rounded-lg transition-all cursor-pointer"
+                  >
+                    Marcar Todas
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDeselectAll}
+                    className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 text-xs font-bold rounded-lg transition-all cursor-pointer"
+                  >
+                    Desmarcar
+                  </button>
                 </div>
               </div>
 
               {/* Action Toolbar */}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs text-slate-400">
-                  Verifique e edite os dados extraídos pela IA do seu romaneio:
+                  {selectedItems.length} entrega(s) selecionada(s) para compor a rota de hoje:
                 </span>
 
                 <div className="flex items-center gap-2">
@@ -1045,7 +1319,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setShowImagePreviewInTable(!showImagePreviewInTable)}
-                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300 rounded-lg border border-slate-700 flex items-center gap-1 transition-all"
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300 rounded-lg border border-slate-700 flex items-center gap-1 transition-all cursor-pointer"
                     >
                       {showImagePreviewInTable ? (
                         <>
@@ -1064,7 +1338,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                   <button
                     type="button"
                     onClick={handleAddNewItem}
-                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-blue-400 rounded-lg border border-slate-700 flex items-center gap-1 transition-all"
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-blue-400 rounded-lg border border-slate-700 flex items-center gap-1 transition-all cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Adicionar Linha</span>
@@ -1083,133 +1357,176 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                   <div className="text-xs text-slate-400 leading-snug flex-1">
                     <p className="font-bold text-white mb-1">Foto Original do Romaneio</p>
                     <span>
-                      Compare visualmente as linhas da tabela abaixo com a imagem fotografada do seu romaneio.
+                      Compare visualmente as linhas da tabela abaixo com a imagem fotografada do seu romaneio. As linhas já assinadas à mão são sinalizadas com badge amarelo.
                     </span>
                   </div>
                 </div>
               )}
 
-              {/* Scrollable Editable List */}
+              {/* Scrollable Editable List with Checkboxes & Detection Badges */}
               <div className="max-h-[380px] overflow-y-auto space-y-2.5 pr-1">
-                {extractedItems.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3.5 transition-all text-xs hover:border-slate-700"
-                  >
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2 flex-1">
-                        <span className="w-6 h-6 rounded-lg bg-blue-600/30 text-blue-400 font-bold text-xs flex items-center justify-center border border-blue-500/30 shrink-0">
-                          {index + 1}
-                        </span>
-                        <input
-                          type="text"
-                          value={item.clientName}
-                          onChange={(e) => handleUpdateItem(item.id, 'clientName', e.target.value)}
-                          placeholder="Nome do Cliente ou Loja *"
-                          className="font-bold text-white bg-transparent border-b border-transparent hover:border-slate-700 focus:border-blue-500 focus:outline-none flex-1 px-1"
-                        />
-                      </div>
+                {itemsToDisplay.map((item, index) => {
+                  const isSelected = selectedItemIds.has(item.id);
+                  const isDone = item.hasSignature || item.alreadyDelivered;
 
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-1.5 cursor-pointer bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
+                  return (
+                    <div
+                      key={item.id}
+                      className={`rounded-2xl p-3.5 transition-all text-xs border ${
+                        isSelected
+                          ? 'bg-slate-950/95 border-blue-500/50 shadow-md shadow-blue-950/20'
+                          : 'bg-slate-950/50 border-slate-800/80 opacity-75 hover:opacity-100'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2.5 flex-1">
+                          {/* Selection Checkbox */}
                           <input
                             type="checkbox"
-                            checked={item.isPriority}
-                            onChange={(e) => handleUpdateItem(item.id, 'isPriority', e.target.checked)}
-                            className="rounded text-red-600 focus:ring-0"
+                            checked={isSelected}
+                            onChange={() => toggleItemSelection(item.id)}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-0 cursor-pointer shrink-0 accent-blue-600"
+                            title={isSelected ? 'Desmarcar da rota' : 'Incluir na rota'}
                           />
-                          <span className="text-[10px] font-bold text-rose-400">Prioridade</span>
-                        </label>
 
-                        <button
-                          onClick={() => handleDeleteItem(item.id)}
-                          className="text-slate-500 hover:text-rose-400 p-1"
-                          title="Remover parada"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                          <span className={`w-6 h-6 rounded-lg font-bold text-xs flex items-center justify-center border shrink-0 ${
+                            isSelected
+                              ? 'bg-blue-600/30 text-blue-400 border-blue-500/30'
+                              : 'bg-slate-800 text-slate-500 border-slate-700'
+                          }`}>
+                            {index + 1}
+                          </span>
+
+                          <input
+                            type="text"
+                            value={item.clientName}
+                            onChange={(e) => handleUpdateItem(item.id, 'clientName', e.target.value)}
+                            placeholder="Nome do Cliente ou Loja *"
+                            className="font-bold text-white bg-transparent border-b border-transparent hover:border-slate-700 focus:border-blue-500 focus:outline-none flex-1 px-1"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Signature / Status Detection Badges */}
+                          {item.hasSignature && (
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                              <span>✍️ Assinado no Papel</span>
+                            </span>
+                          )}
+
+                          {item.alreadyDelivered && (
+                            <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                              <span>✓ Entregue Anteriormente</span>
+                            </span>
+                          )}
+
+                          {item.orderNumber && (
+                            <span className="text-[10px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                              Ped #{item.orderNumber}
+                            </span>
+                          )}
+
+                          <label className="flex items-center gap-1.5 cursor-pointer bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
+                            <input
+                              type="checkbox"
+                              checked={item.isPriority}
+                              onChange={(e) => handleUpdateItem(item.id, 'isPriority', e.target.checked)}
+                              className="rounded text-red-600 focus:ring-0"
+                            />
+                            <span className="text-[10px] font-bold text-rose-400">Prioridade</span>
+                          </label>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteItem(item.id)}
+                            className="text-slate-500 hover:text-rose-400 p-1"
+                            title="Remover parada"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Address with explicit City indicator */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-2">
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            value={item.address}
+                            onChange={(e) => handleUpdateItem(item.id, 'address', e.target.value)}
+                            placeholder="Endereço de entrega completo (Rua, Número, Bairro) *"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200 text-xs focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-blue-950/70 border border-blue-500/40 rounded-xl px-2.5 py-1.5 text-blue-300 font-bold shrink-0">
+                          <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                          <span className="text-[10px] text-slate-400">Município:</span>
+                          <input
+                            type="text"
+                            value={item.city || 'Campinas'}
+                            onChange={(e) => handleUpdateItem(item.id, 'city', e.target.value)}
+                            placeholder="Cidade"
+                            title="Município da entrega (coluna Cidades do romaneio)"
+                            className="bg-transparent border-none text-xs font-bold text-blue-300 w-24 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div>
+                          <span className="text-[10px] text-slate-500 block mb-0.5">Valor (R$)</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={item.orderValue}
+                            onChange={(e) =>
+                              handleUpdateItem(item.id, 'orderValue', parseFloat(e.target.value) || 0)
+                            }
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] text-slate-500 block mb-0.5">Peso (kg)</span>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={item.totalWeight}
+                            onChange={(e) =>
+                              handleUpdateItem(item.id, 'totalWeight', parseFloat(e.target.value) || 0)
+                            }
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-bold focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] text-slate-500 block mb-0.5">Pagamento</span>
+                          <select
+                            value={item.paymentMethod}
+                            onChange={(e) =>
+                              handleUpdateItem(item.id, 'paymentMethod', e.target.value as any)
+                            }
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-slate-300 font-medium focus:outline-none focus:border-blue-500"
+                          >
+                            <option value="a_vista">À Vista</option>
+                            <option value="a_prazo">A Prazo</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] text-slate-500 block mb-0.5">Obs / Pedido</span>
+                          <input
+                            type="text"
+                            value={item.notes || ''}
+                            onChange={(e) => handleUpdateItem(item.id, 'notes', e.target.value)}
+                            placeholder="Ex: Pedido 6540297"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-amber-300 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
                       </div>
                     </div>
-
-                    {/* Address with explicit City indicator */}
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-2">
-                      <div className="flex-1">
-                        <input
-                          type="text"
-                          value={item.address}
-                          onChange={(e) => handleUpdateItem(item.id, 'address', e.target.value)}
-                          placeholder="Endereço de entrega completo (Rua, Número, Bairro) *"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200 text-xs focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-                      <div className="flex items-center gap-1.5 bg-blue-950/70 border border-blue-500/40 rounded-xl px-2.5 py-1.5 text-blue-300 font-bold shrink-0">
-                        <MapPin className="w-3.5 h-3.5 text-blue-400" />
-                        <span className="text-[10px] text-slate-400">Município:</span>
-                        <input
-                          type="text"
-                          value={item.city || 'Campinas'}
-                          onChange={(e) => handleUpdateItem(item.id, 'city', e.target.value)}
-                          placeholder="Cidade"
-                          title="Município da entrega (coluna Cidades do romaneio)"
-                          className="bg-transparent border-none text-xs font-bold text-blue-300 w-24 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <div>
-                        <span className="text-[10px] text-slate-500 block mb-0.5">Valor (R$)</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.orderValue}
-                          onChange={(e) =>
-                            handleUpdateItem(item.id, 'orderValue', parseFloat(e.target.value) || 0)
-                          }
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
-                        />
-                      </div>
-
-                      <div>
-                        <span className="text-[10px] text-slate-500 block mb-0.5">Peso (kg)</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={item.totalWeight}
-                          onChange={(e) =>
-                            handleUpdateItem(item.id, 'totalWeight', parseFloat(e.target.value) || 0)
-                          }
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-bold focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-
-                      <div>
-                        <span className="text-[10px] text-slate-500 block mb-0.5">Pagamento</span>
-                        <select
-                          value={item.paymentMethod}
-                          onChange={(e) =>
-                            handleUpdateItem(item.id, 'paymentMethod', e.target.value as any)
-                          }
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-slate-300 font-medium focus:outline-none focus:border-blue-500"
-                        >
-                          <option value="a_vista">À Vista</option>
-                          <option value="a_prazo">A Prazo</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <span className="text-[10px] text-slate-500 block mb-0.5">Obs / Pedido</span>
-                        <input
-                          type="text"
-                          value={item.notes || ''}
-                          onChange={(e) => handleUpdateItem(item.id, 'notes', e.target.value)}
-                          placeholder="Ex: Pedido 6540297"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-amber-300 focus:outline-none focus:border-amber-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Progress status during geocoding */}
@@ -1225,7 +1542,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                   type="button"
                   onClick={() => {
                     setExtractedItems([]);
-                    setPreviewUrl(null);
+                    setCapturedImages([]);
                     setErrorMessage(null);
                   }}
                   className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl flex items-center gap-1.5"
@@ -1237,7 +1554,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                 <button
                   type="button"
                   onClick={handleConfirmImport}
-                  disabled={isProcessing}
+                  disabled={isProcessing || selectedItems.length === 0}
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl shadow-lg shadow-emerald-900/40 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   {isProcessing ? (
@@ -1248,7 +1565,9 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      <span>Confirmar e Gerar Rota Automática</span>
+                      <span>
+                        Gerar Rota Otimizada ({selectedItems.length} entrega{selectedItems.length !== 1 ? 's' : ''})
+                      </span>
                     </>
                   )}
                 </button>
