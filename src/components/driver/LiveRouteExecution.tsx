@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Route, Stop } from '../../types';
+import { ConfirmModal } from '../common/ConfirmModal';
 import {
   PackageCheck,
   CheckCircle2,
@@ -11,17 +12,21 @@ import {
   Fuel,
   Weight,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 
 interface LiveRouteExecutionProps {
   route: Route;
   onFinishEntireRoute?: () => void;
+  onClearRoute?: () => void;
 }
 
 export const LiveRouteExecution: React.FC<LiveRouteExecutionProps> = ({
   route,
   onFinishEntireRoute,
+  onClearRoute,
 }) => {
+  const [showConfirmClear, setShowConfirmClear] = useState(false);
   const totalStops = route.stops.length;
   const completedStops = route.stops.filter((s) => s.status === 'entregue').length;
   const canceledStops = route.stops.filter((s) => s.status === 'cancelada').length;
@@ -56,10 +61,23 @@ export const LiveRouteExecution: React.FC<LiveRouteExecutionProps> = ({
           </div>
         </div>
 
-        <div className="text-right">
-          <span className="text-2xl font-black text-emerald-400 font-mono">
-            {percentComplete}%
-          </span>
+        <div className="flex items-center gap-2 sm:gap-3">
+          {onClearRoute && route.stops.length > 0 && (
+            <button
+              onClick={() => setShowConfirmClear(true)}
+              className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Apagar rota ativa atual"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Apagar Rota Ativa</span>
+            </button>
+          )}
+
+          <div className="text-right">
+            <span className="text-2xl font-black text-emerald-400 font-mono">
+              {percentComplete}%
+            </span>
+          </div>
         </div>
       </div>
 
@@ -183,6 +201,21 @@ export const LiveRouteExecution: React.FC<LiveRouteExecutionProps> = ({
           )}
         </div>
       )}
+
+      {/* Confirmation Modal to Clear Active Route */}
+      <ConfirmModal
+        isOpen={showConfirmClear}
+        title="Apagar Rota Ativa Atual?"
+        description={`Tem certeza que deseja apagar a rota ativa com ${totalStops} parada(s)? Todas as entregas cadastradas, valores calculados e o traçado de GPS serão limpos para você iniciar um novo romaneio.`}
+        confirmLabel="Sim, Apagar Rota Ativa"
+        cancelLabel="Cancelar"
+        variant="danger"
+        onConfirm={() => {
+          setShowConfirmClear(false);
+          onClearRoute?.();
+        }}
+        onCancel={() => setShowConfirmClear(false)}
+      />
     </div>
   );
 };

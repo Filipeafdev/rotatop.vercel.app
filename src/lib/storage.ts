@@ -1,197 +1,172 @@
 import { collection, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
-import { Route, Stop, UserProfile, Vehicle } from '../types';
+import {
+  Route,
+  Stop,
+  UserProfile,
+  Vehicle,
+  MaintenanceRecord,
+  ClosureDeletionRequest,
+  CompanyBase,
+} from '../types';
 
-export const INITIAL_VEHICLES: Vehicle[] = [
-  {
-    id: 'veh-1',
-    plate: 'BRA-2E19',
-    model: 'Sprinter 314 CDI Furgão',
-    brand: 'Mercedes-Benz',
-    year: 2022,
-    avgKmLiter: 9.2,
-    fuelType: 'diesel',
-    status: 'ativo',
-    assignedDriverName: 'Carlos Silva (Você)',
-    assignedDriverId: 'driver-carlos',
-  },
-  {
-    id: 'veh-2',
-    plate: 'RTO-8A45',
-    model: 'Fiorino 1.4 EVO Flex',
-    brand: 'Fiat',
-    year: 2023,
-    avgKmLiter: 11.5,
-    fuelType: 'gasolina',
-    status: 'ativo',
-    assignedDriverName: 'Marcos Oliveira',
-    assignedDriverId: 'driver-marcos',
-  },
-  {
-    id: 'veh-3',
-    plate: 'LOG-4F90',
-    model: 'Delivery 9.170 V-Tronic',
-    brand: 'Volkswagen',
-    year: 2021,
-    avgKmLiter: 6.8,
-    fuelType: 'diesel',
-    status: 'manutencao',
-    assignedDriverName: 'Roberto Souza',
-    assignedDriverId: 'driver-roberto',
-  },
-];
+// Migration flag to ensure old mock data from previous turns is cleanly cleared
+const STORAGE_CLEAN_VERSION_KEY = 'rotatop_clean_pilot_v3';
+if (typeof window !== 'undefined' && !localStorage.getItem(STORAGE_CLEAN_VERSION_KEY)) {
+  // Clear old mock data keys
+  localStorage.removeItem('rotatop_vehicles_v1');
+  localStorage.removeItem('rotatop_active_route_v1');
+  localStorage.removeItem('rotatop_history_routes_v1');
+  localStorage.removeItem('rotatop_user_profile_v1');
+  localStorage.removeItem('rotatop_maintenances_v1');
+  localStorage.removeItem('rotatop_deletion_requests_v1');
+  localStorage.removeItem('rotatop_drivers_v1');
+  localStorage.setItem(STORAGE_CLEAN_VERSION_KEY, 'true');
+}
+
+// Initial Clean State (No Fictitious Data)
+export const INITIAL_VEHICLES: Vehicle[] = [];
+
+export const INITIAL_COMPANY_BASES: CompanyBase[] = [];
 
 export const INITIAL_USERS: UserProfile[] = [
   {
-    uid: 'driver-carlos',
-    email: 'carlos.motorista@rotatop.com.br',
-    displayName: 'Carlos Silva',
-    role: 'motorista',
-    phone: '(11) 98765-4321',
-    vehiclePlate: 'BRA-2E19',
-  },
-  {
-    uid: 'manager-mariana',
-    email: 'mariana.gestor@rotatop.com.br',
-    displayName: 'Mariana Souza',
+    uid: 'gestor-filipe',
+    email: 'filipeafdev@gmail.com',
+    displayName: 'Filipe (Gestor)',
     role: 'gestor',
-    phone: '(11) 99123-8899',
+    phone: '',
   },
 ];
 
-export const INITIAL_STOPS: Stop[] = [
-  {
-    id: 'stop-1',
-    routeId: 'route-today-01',
-    sequenceIndex: 1,
-    clientName: 'Supermercado Central Pinheiros',
-    address: 'Av. Brigadeiro Faria Lima, 2232, Pinheiros, São Paulo - SP',
-    lat: -23.5762,
-    lng: -46.6908,
-    orderValue: 850.0,
-    totalWeight: 140.0,
-    isPriority: true,
-    paymentMethod: 'a_vista',
-    notes: 'Entregar na doca 2 até às 10h. Falar com Seu Antenor.',
-    status: 'entregue',
-    deliveredAt: '2026-10-25T08:35:00',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'stop-2',
-    routeId: 'route-today-01',
-    sequenceIndex: 2,
-    clientName: 'Drogaria Pacheco & Cia',
-    address: 'Av. Paulista, 1000, Bela Vista, São Paulo - SP',
-    lat: -23.5654,
-    lng: -46.6517,
-    orderValue: 420.5,
-    totalWeight: 45.0,
-    isPriority: false,
-    paymentMethod: 'a_prazo',
-    notes: 'Caixas com medicamentos lacrados. Coletar assinatura no canhoto.',
-    status: 'pendente',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'stop-3',
-    routeId: 'route-today-01',
-    sequenceIndex: 3,
-    clientName: 'Restaurante Sabor de Minas',
-    address: 'R. Augusta, 1492, Consolação, São Paulo - SP',
-    lat: -23.5559,
-    lng: -46.6577,
-    orderValue: 1280.0,
-    totalWeight: 210.0,
-    isPriority: false,
-    paymentMethod: 'a_vista',
-    notes: 'Recebimento nos fundos. Pagamento em PIX na conferência.',
-    status: 'pendente',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'stop-4',
-    routeId: 'route-today-01',
-    sequenceIndex: 4,
-    clientName: 'Padaria Bella Paulista',
-    address: 'R. Haddock Lobo, 354, Cerqueira César, São Paulo - SP',
-    lat: -23.5582,
-    lng: -46.6625,
-    orderValue: 340.0,
-    totalWeight: 60.0,
-    isPriority: false,
-    paymentMethod: 'a_prazo',
-    notes: 'Farináceos e laticínios.',
-    status: 'pendente',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'stop-5',
-    routeId: 'route-today-01',
-    sequenceIndex: 5,
-    clientName: 'Auto Peças Express',
-    address: 'Av. do Estado, 5500, Cambuci, São Paulo - SP',
-    lat: -23.5611,
-    lng: -46.6198,
-    orderValue: 690.0,
-    totalWeight: 85.0,
-    isPriority: false,
-    paymentMethod: 'a_vista',
-    notes: 'Bater no portão lateral de cargas.',
-    status: 'pendente',
-    createdAt: new Date().toISOString(),
-  },
-];
+export const INITIAL_STOPS: Stop[] = [];
+
+export const INITIAL_MAINTENANCES: MaintenanceRecord[] = [];
 
 export const INITIAL_ROUTE: Route = {
-  id: 'route-today-01',
-  driverId: 'driver-carlos',
-  driverName: 'Carlos Silva',
-  vehiclePlate: 'BRA-2E19',
-  date: '2026-10-25',
-  status: 'em_andamento',
-  startAddress: 'CD Central Distribuição - Rod. Anhanguera, km 18, São Paulo - SP',
-  startCoords: { lat: -23.5042, lng: -46.7456 },
-  endAddress: 'Residência do Motorista - R. Domingos de Morais, 1800, Vila Mariana, São Paulo - SP',
-  endCoords: { lat: -23.5912, lng: -46.6384 },
-  productiveKm: 18.4,
-  unproductiveKm: 22.8,
-  totalKm: 41.2,
-  avgKmLiter: 9.2,
-  fuelPrice: 6.29,
-  estimatedFuelCost: 28.17,
-  totalWeight: 540.0,
-  totalValue: 3580.5,
-  deliveredWeight: 140.0,
-  deliveredValue: 850.0,
-  stops: INITIAL_STOPS,
-  createdAt: '2026-10-25T07:30:00',
+  id: 'route-active',
+  driverId: '',
+  driverName: '',
+  vehiclePlate: '',
+  date: new Date().toISOString().slice(0, 10),
+  status: 'planejada',
+  startAddress: '',
+  startCoords: { lat: -22.9056, lng: -47.0608 },
+  endAddress: '',
+  endCoords: { lat: -22.9056, lng: -47.0608 },
+  productiveKm: 0,
+  unproductiveKm: 0,
+  totalKm: 0,
+  avgKmLiter: 9.0,
+  fuelPrice: 6.19,
+  estimatedFuelCost: 0,
+  totalWeight: 0,
+  totalValue: 0,
+  deliveredWeight: 0,
+  deliveredValue: 0,
+  stops: [],
+  createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
 
-// Local storage keys
-const KEY_VEHICLES = 'rotatop_vehicles_v1';
-const KEY_ACTIVE_ROUTE = 'rotatop_active_route_v1';
-const KEY_HISTORICAL_ROUTES = 'rotatop_history_routes_v1';
-const KEY_CURRENT_USER = 'rotatop_user_profile_v1';
+// Storage Keys
+const KEY_VEHICLES = 'rotatop_vehicles_v2';
+const KEY_ACTIVE_ROUTE = 'rotatop_active_route_v2';
+const KEY_HISTORICAL_ROUTES = 'rotatop_history_routes_v2';
+const KEY_CURRENT_USER = 'rotatop_user_profile_v2';
+const KEY_DRIVERS = 'rotatop_drivers_v2';
+const KEY_COMPANY_BASES = 'rotatop_company_bases_v2';
+const KEY_MAINTENANCES = 'rotatop_maintenances_v2';
+const KEY_DELETION_REQUESTS = 'rotatop_deletion_requests_v2';
 
 export const storage = {
+  // 1. Company Bases (CD / Galpão / Matriz)
+  getCompanyBases(): CompanyBase[] {
+    const raw = localStorage.getItem(KEY_COMPANY_BASES);
+    if (!raw) {
+      return INITIAL_COMPANY_BASES;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  },
+
+  saveCompanyBases(bases: CompanyBase[]) {
+    localStorage.setItem(KEY_COMPANY_BASES, JSON.stringify(bases));
+    bases.forEach(async (b) => {
+      try {
+        await setDoc(doc(db, 'company_bases', b.id), b, { merge: true });
+      } catch (e) {
+        // quiet fallback
+      }
+    });
+  },
+
+  addCompanyBase(base: CompanyBase): CompanyBase[] {
+    const bases = this.getCompanyBases();
+    // If marked default, unmark others
+    const updated = base.isDefault
+      ? [base, ...bases.map((b) => ({ ...b, isDefault: false }))]
+      : [base, ...bases];
+    this.saveCompanyBases(updated);
+    return updated;
+  },
+
+  // 2. Drivers
+  getDrivers(): UserProfile[] {
+    const raw = localStorage.getItem(KEY_DRIVERS);
+    if (!raw) {
+      return [];
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  },
+
+  saveDrivers(drivers: UserProfile[]) {
+    localStorage.setItem(KEY_DRIVERS, JSON.stringify(drivers));
+    drivers.forEach(async (d) => {
+      try {
+        await setDoc(doc(db, 'users', d.uid), d, { merge: true });
+      } catch (e) {
+        // quiet fallback
+      }
+    });
+  },
+
+  saveDriver(driver: UserProfile): UserProfile[] {
+    const drivers = this.getDrivers();
+    const existingIndex = drivers.findIndex((d) => d.uid === driver.uid);
+    let updated: UserProfile[];
+    if (existingIndex >= 0) {
+      updated = [...drivers];
+      updated[existingIndex] = driver;
+    } else {
+      updated = [...drivers, driver];
+    }
+    this.saveDrivers(updated);
+    return updated;
+  },
+
+  // 3. Vehicles
   getVehicles(): Vehicle[] {
     const raw = localStorage.getItem(KEY_VEHICLES);
     if (!raw) {
-      localStorage.setItem(KEY_VEHICLES, JSON.stringify(INITIAL_VEHICLES));
       return INITIAL_VEHICLES;
     }
     try {
       return JSON.parse(raw);
     } catch {
-      return INITIAL_VEHICLES;
+      return [];
     }
   },
 
   saveVehicles(vehicles: Vehicle[]) {
     localStorage.setItem(KEY_VEHICLES, JSON.stringify(vehicles));
-    // Try firestore sync in background
     vehicles.forEach(async (v) => {
       try {
         await setDoc(doc(db, 'vehicles', v.id), v, { merge: true });
@@ -201,10 +176,10 @@ export const storage = {
     });
   },
 
+  // 4. Active Route
   getActiveRoute(): Route {
     const raw = localStorage.getItem(KEY_ACTIVE_ROUTE);
     if (!raw) {
-      localStorage.setItem(KEY_ACTIVE_ROUTE, JSON.stringify(INITIAL_ROUTE));
       return INITIAL_ROUTE;
     }
     try {
@@ -216,7 +191,6 @@ export const storage = {
 
   saveActiveRoute(route: Route) {
     localStorage.setItem(KEY_ACTIVE_ROUTE, JSON.stringify(route));
-    // Try firestore sync in background
     try {
       setDoc(doc(db, 'routes', route.id), route, { merge: true });
     } catch (e) {
@@ -224,89 +198,50 @@ export const storage = {
     }
   },
 
+  clearActiveRoute(): Route {
+    const bases = this.getCompanyBases();
+    const defaultBase = bases.find((b) => b.isDefault) || bases[0];
+    const currentUser = this.getCurrentUser();
+
+    const emptyRoute: Route = {
+      id: `route-${Date.now()}`,
+      driverId: currentUser.uid || '',
+      driverName: currentUser.displayName || '',
+      vehiclePlate: currentUser.vehiclePlate || '',
+      date: new Date().toISOString().slice(0, 10),
+      status: 'planejada',
+      startAddress: defaultBase ? defaultBase.address : '',
+      startCoords: defaultBase ? defaultBase.coords : { lat: -22.9056, lng: -47.0608 },
+      endAddress: currentUser.homeAddress || '',
+      endCoords: currentUser.homeCoords || (defaultBase ? defaultBase.coords : { lat: -22.9056, lng: -47.0608 }),
+      productiveKm: 0,
+      unproductiveKm: 0,
+      totalKm: 0,
+      avgKmLiter: 9.0,
+      fuelPrice: 6.19,
+      estimatedFuelCost: 0,
+      totalWeight: 0,
+      totalValue: 0,
+      deliveredWeight: 0,
+      deliveredValue: 0,
+      stops: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(KEY_ACTIVE_ROUTE, JSON.stringify(emptyRoute));
+    try {
+      setDoc(doc(db, 'routes', emptyRoute.id), emptyRoute, { merge: true });
+    } catch (e) {
+      // quiet fallback
+    }
+    return emptyRoute;
+  },
+
+  // 5. Historical Routes
   getHistoricalRoutes(): Route[] {
     const raw = localStorage.getItem(KEY_HISTORICAL_ROUTES);
     if (!raw) {
-      // Create sample previous routes for realistic reports
-      const samples: Route[] = [
-        {
-          id: 'route-prev-1',
-          driverId: 'driver-carlos',
-          driverName: 'Carlos Silva',
-          vehiclePlate: 'BRA-2E19',
-          date: '2026-10-24',
-          status: 'concluida',
-          startAddress: 'CD Central Distribuição - Rod. Anhanguera, km 18, São Paulo - SP',
-          startCoords: { lat: -23.5042, lng: -46.7456 },
-          endAddress: 'Residência do Motorista - R. Domingos de Morais, 1800, São Paulo - SP',
-          endCoords: { lat: -23.5912, lng: -46.6384 },
-          productiveKm: 34.2,
-          unproductiveKm: 19.5,
-          totalKm: 53.7,
-          avgKmLiter: 9.2,
-          fuelPrice: 6.29,
-          estimatedFuelCost: 36.71,
-          totalWeight: 680.0,
-          totalValue: 4920.0,
-          deliveredWeight: 680.0,
-          deliveredValue: 4920.0,
-          stops: [],
-          createdAt: '2026-10-24T08:00:00',
-          updatedAt: '2026-10-24T17:40:00',
-        },
-        {
-          id: 'route-prev-2',
-          driverId: 'driver-carlos',
-          driverName: 'Carlos Silva',
-          vehiclePlate: 'BRA-2E19',
-          date: '2026-10-23',
-          status: 'concluida',
-          startAddress: 'CD Central Distribuição - Rod. Anhanguera, km 18, São Paulo - SP',
-          startCoords: { lat: -23.5042, lng: -46.7456 },
-          endAddress: 'Residência do Motorista - R. Domingos de Morais, 1800, São Paulo - SP',
-          endCoords: { lat: -23.5912, lng: -46.6384 },
-          productiveKm: 28.6,
-          unproductiveKm: 21.0,
-          totalKm: 49.6,
-          avgKmLiter: 9.2,
-          fuelPrice: 6.25,
-          estimatedFuelCost: 33.69,
-          totalWeight: 510.0,
-          totalValue: 3840.0,
-          deliveredWeight: 460.0,
-          deliveredValue: 3450.0,
-          stops: [],
-          createdAt: '2026-10-23T08:00:00',
-          updatedAt: '2026-10-23T16:50:00',
-        },
-        {
-          id: 'route-prev-3',
-          driverId: 'driver-marcos',
-          driverName: 'Marcos Oliveira',
-          vehiclePlate: 'RTO-8A45',
-          date: '2026-10-24',
-          status: 'concluida',
-          startAddress: 'Galpão Logístico Rotatop - Av. Nações Unidas',
-          startCoords: { lat: -23.6268, lng: -46.7029 },
-          endAddress: 'Garagem Base',
-          endCoords: { lat: -23.5855, lng: -46.6347 },
-          productiveKm: 41.5,
-          unproductiveKm: 14.8,
-          totalKm: 56.3,
-          avgKmLiter: 11.5,
-          fuelPrice: 6.19,
-          estimatedFuelCost: 30.3,
-          totalWeight: 390.0,
-          totalValue: 2950.0,
-          deliveredWeight: 390.0,
-          deliveredValue: 2950.0,
-          stops: [],
-          createdAt: '2026-10-24T08:30:00',
-          updatedAt: '2026-10-24T18:10:00',
-        },
-      ];
-      localStorage.setItem(KEY_HISTORICAL_ROUTES, JSON.stringify(samples));
-      return samples;
+      return [];
     }
     try {
       return JSON.parse(raw);
@@ -315,6 +250,18 @@ export const storage = {
     }
   },
 
+  saveHistoricalRoutes(routes: Route[]) {
+    localStorage.setItem(KEY_HISTORICAL_ROUTES, JSON.stringify(routes));
+    routes.forEach(async (r) => {
+      try {
+        await setDoc(doc(db, 'routes', r.id), r, { merge: true });
+      } catch (e) {
+        // quiet fallback
+      }
+    });
+  },
+
+  // 6. Current User
   getCurrentUser(): UserProfile {
     const raw = localStorage.getItem(KEY_CURRENT_USER);
     if (!raw) {
@@ -330,5 +277,60 @@ export const storage = {
 
   saveCurrentUser(user: UserProfile) {
     localStorage.setItem(KEY_CURRENT_USER, JSON.stringify(user));
+  },
+
+  // 7. Maintenance Records
+  getMaintenanceRecords(): MaintenanceRecord[] {
+    const raw = localStorage.getItem(KEY_MAINTENANCES);
+    if (!raw) {
+      return [];
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  },
+
+  saveMaintenanceRecords(records: MaintenanceRecord[]) {
+    localStorage.setItem(KEY_MAINTENANCES, JSON.stringify(records));
+    records.forEach(async (rec) => {
+      try {
+        await setDoc(doc(db, 'maintenance', rec.id), rec, { merge: true });
+      } catch (e) {
+        // quiet fallback
+      }
+    });
+  },
+
+  addMaintenanceRecord(record: MaintenanceRecord): MaintenanceRecord[] {
+    const records = this.getMaintenanceRecords();
+    const updated = [record, ...records];
+    this.saveMaintenanceRecords(updated);
+    return updated;
+  },
+
+  // 8. Deletion Requests
+  getDeletionRequests(): ClosureDeletionRequest[] {
+    const raw = localStorage.getItem(KEY_DELETION_REQUESTS);
+    if (!raw) {
+      return [];
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  },
+
+  saveDeletionRequests(requests: ClosureDeletionRequest[]) {
+    localStorage.setItem(KEY_DELETION_REQUESTS, JSON.stringify(requests));
+    requests.forEach(async (req) => {
+      try {
+        await setDoc(doc(db, 'closure_deletion_requests', req.id), req, { merge: true });
+      } catch (e) {
+        // quiet fallback
+      }
+    });
   },
 };

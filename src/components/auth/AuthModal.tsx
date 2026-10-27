@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { signInWithPopup } from 'firebase/auth';
 import { auth, googleAuthProvider } from '../../lib/firebase';
 import { UserProfile, UserRole } from '../../types';
-import { INITIAL_USERS } from '../../lib/storage';
+import { INITIAL_USERS, storage } from '../../lib/storage';
 import {
   Shield,
   Truck,
@@ -17,6 +17,8 @@ import {
   ArrowRight,
   KeyRound,
   FileSpreadsheet,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -40,6 +42,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Email / password state
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [isRegisterMode, setIsRegisterMode] = useState(false);
 
@@ -71,18 +74,68 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleManualLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailInput.trim()) return;
+    setAuthError(null);
+    const cleanEmail = emailInput.trim().toLowerCase();
+    const cleanPassword = passwordInput.trim();
 
-    const profile: UserProfile = {
-      uid: `user-${Date.now()}`,
-      email: emailInput.trim(),
-      displayName: nameInput.trim() || emailInput.split('@')[0],
-      role: selectedPortal,
-      vehiclePlate: selectedPortal === 'motorista' ? 'BRA-2E19' : undefined,
-    };
+    if (!cleanEmail) {
+      setAuthError('Por favor, informe seu e-mail de acesso.');
+      return;
+    }
 
-    onSelectUser(profile);
-    onClose();
+    if (!cleanPassword) {
+      setAuthError('Por favor, informe sua senha de acesso.');
+      return;
+    }
+
+    if (selectedPortal === 'motorista') {
+      const registeredDrivers = storage.getDrivers();
+      const driver = registeredDrivers.find(
+        (d) => d.email.trim().toLowerCase() === cleanEmail
+      );
+
+      if (!driver) {
+        setAuthError(
+          'E-mail não encontrado no cadastro da frota. Peça ao gestor para cadastrar seu e-mail e gerar sua senha na aba "Bases & Endereços".'
+        );
+        return;
+      }
+
+      // Check password if set by manager
+      const expectedPassword = driver.accessPassword || 'Rota@1234';
+      if (cleanPassword !== expectedPassword) {
+        setAuthError(
+          'Senha de acesso incorreta! Utilize a senha gerada pelo gestor para o seu cadastro.'
+        );
+        return;
+      }
+
+      // Successful login with all data tied to manager panel
+      onSelectUser(driver);
+      onClose();
+      return;
+    }
+
+    if (selectedPortal === 'gestor') {
+      const gestores = INITIAL_USERS.filter((u) => u.role === 'gestor');
+      const gestor = gestores.find((g) => g.email.trim().toLowerCase() === cleanEmail);
+
+      if (gestor) {
+        onSelectUser(gestor);
+        onClose();
+        return;
+      }
+
+      const profile: UserProfile = {
+        uid: `gestor-${Date.now()}`,
+        email: emailInput.trim(),
+        displayName: nameInput.trim() || emailInput.split('@')[0],
+        role: 'gestor',
+      };
+
+      onSelectUser(profile);
+      onClose();
+    }
   };
 
   const handleFastDemoLogin = (user: UserProfile) => {
@@ -214,46 +267,79 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             Acesso Rápido ({selectedPortal === 'motorista' ? 'Motoristas Cadastrados' : 'Gestores Autorizados'}):
           </span>
 
-          <div className="space-y-2">
-            {INITIAL_USERS.filter((u) => u.role === selectedPortal).map((user) => (
-              <button
-                key={user.uid}
-                type="button"
-                onClick={() => handleFastDemoLogin(user)}
-                className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
-                  currentUser.uid === user.uid
-                    ? 'bg-slate-800 border-emerald-500/50 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
-                      selectedPortal === 'motorista'
-                        ? 'bg-amber-500/20 text-amber-400'
-                        : 'bg-blue-500/20 text-blue-400'
+          {(() => {
+            const registeredDrivers = storage.getDrivers();
+            // Merge INITIAL_USERS and registeredDrivers deduplicated by uid
+            const allUsersMap = new Map<string, UserProfile>();
+            INITIAL_USERS.forEach((u) => allUsersMap.set(u.uid, u));
+            registeredDrivers.forEach((d) => allUsersMap.set(d.uid, d));
+            const portalUsers = Array.from(allUsersMap.values()).filter(
+              (u) => u.role === selectedPortal
+            );
+
+            if (portalUsers.length === 0) {
+              return (
+                <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl text-center">
+                  <p className="text-xs text-slate-400">
+                    Nenhum motorista cadastrado ainda no sistema.
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    O gestor pode cadastrar motoristas e seus endereços de residência na aba &ldquo;Bases &amp; Endereços&rdquo;, ou você pode criar uma conta abaixo.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-2">
+                {portalUsers.map((user) => (
+                  <button
+                    key={user.uid}
+                    type="button"
+                    onClick={() => handleFastDemoLogin(user)}
+                    className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                      currentUser.uid === user.uid
+                        ? 'bg-slate-800 border-emerald-500/50 text-white'
+                        : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
                     }`}
                   >
-                    {user.displayName.substring(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-white block">
-                      {user.displayName}
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      {user.email}{' '}
-                      {user.vehiclePlate ? `• Veículo ${user.vehiclePlate}` : ''}
-                    </span>
-                  </div>
-                </div>
+                    <div className="flex items-center gap-2.5">
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                          selectedPortal === 'motorista'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-blue-500/20 text-blue-400'
+                        }`}
+                      >
+                        {user.displayName.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-white block">
+                          {user.displayName}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block">
+                          {user.email}{' '}
+                          {user.vehiclePlate ? `• Placa ${user.vehiclePlate}` : ''}
+                          {user.homeAddress ? ` • Reside em: ${user.homeAddress.split(',')[0]}` : ''}
+                        </span>
+                        {user.accessPassword && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono text-amber-300 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 rounded mt-1">
+                            <KeyRound className="w-2.5 h-2.5 text-amber-400" />
+                            Senha: {user.accessPassword}
+                          </span>
+                        )}
+                      </div>
+                    </div>
 
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                  <span>Entrar</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </div>
-              </button>
-            ))}
-          </div>
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                      <span>Entrar</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Email / Password Form or Google Login */}
@@ -294,15 +380,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold text-slate-400 mb-1">Senha</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-bold text-slate-400">
+                  Senha {selectedPortal === 'motorista' ? 'Gerada pelo Gestor' : ''}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 font-medium transition-colors"
+                >
+                  {showPassword ? (
+                    <>
+                      <EyeOff className="w-3 h-3" />
+                      <span>Ocultar</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3 h-3" />
+                      <span>Ver Senha</span>
+                    </>
+                  )}
+                </button>
+              </div>
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-blue-500"
+                placeholder={
+                  selectedPortal === 'motorista'
+                    ? 'Digite a senha gerada pelo gestor'
+                    : '••••••••'
+                }
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
               />
+              {selectedPortal === 'motorista' && (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Dica: Sua senha é informada pelo gestor no cadastro do painel da transportadora.
+                </p>
+              )}
             </div>
 
             <div className="flex items-center justify-between text-[11px] pt-1">

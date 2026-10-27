@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Route, TimeFilter } from '../../types';
+import { RequestClosureDeletionModal } from './RequestClosureDeletionModal';
 import {
   Calendar,
   Download,
@@ -12,18 +13,25 @@ import {
   DollarSign,
   FileSpreadsheet,
   ArrowUpRight,
+  Trash2,
+  Clock,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface DailyReportViewProps {
   activeRoute: Route;
   historicalRoutes: Route[];
+  onRequestDeleteRoute?: (routeId: string, reason: string) => void;
 }
 
 export const DailyReportView: React.FC<DailyReportViewProps> = ({
   activeRoute,
   historicalRoutes,
+  onRequestDeleteRoute,
 }) => {
   const [filter, setFilter] = useState<TimeFilter>('dia');
+  const [isDeletionModalOpen, setIsDeletionModalOpen] = useState(false);
+  const [selectedRouteForDeletion, setSelectedRouteForDeletion] = useState<Route | null>(null);
 
   const allRoutes = [activeRoute, ...historicalRoutes];
 
@@ -239,6 +247,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                 <th className="p-3">Combustível</th>
                 <th className="p-3">Valor Faturado</th>
                 <th className="p-3">Status</th>
+                <th className="p-3 text-right">Ação</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -257,15 +266,44 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                     R$ {r.deliveredValue.toFixed(2)}
                   </td>
                   <td className="p-3">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                        r.status === 'concluida'
-                          ? 'bg-emerald-500/20 text-emerald-400'
-                          : 'bg-blue-500/20 text-blue-400'
-                      }`}
-                    >
-                      {r.status}
-                    </span>
+                    {r.status === 'aguardando_exclusao' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                        <Clock className="w-3 h-3 text-amber-400" />
+                        Aguardando Gestor
+                      </span>
+                    ) : (
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                          r.status === 'concluida'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : 'bg-blue-500/20 text-blue-400'
+                        }`}
+                      >
+                        {r.status}
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-3 text-right">
+                    {r.status === 'aguardando_exclusao' ? (
+                      <span
+                        className="text-[11px] text-amber-400/90 font-medium cursor-help"
+                        title={r.deletionReason ? `Motivo: ${r.deletionReason}` : 'Aguardando aprovação do gestor'}
+                      >
+                        Exclusão solicitada
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setSelectedRouteForDeletion(r);
+                          setIsDeletionModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 border border-rose-500/30 rounded-lg transition-all cursor-pointer"
+                        title="Solicitar aprovação para apagar este fechamento"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Apagar Fechamento</span>
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -273,6 +311,19 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Closure Deletion Request Modal */}
+      <RequestClosureDeletionModal
+        isOpen={isDeletionModalOpen}
+        route={selectedRouteForDeletion}
+        onClose={() => {
+          setIsDeletionModalOpen(false);
+          setSelectedRouteForDeletion(null);
+        }}
+        onSubmitRequest={(routeId, reason) => {
+          onRequestDeleteRoute?.(routeId, reason);
+        }}
+      />
     </div>
   );
 };

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Route, Stop, AddressSuggestion } from '../../types';
+import { Route, Stop, AddressSuggestion, CompanyBase, UserProfile } from '../../types';
 import { searchAddressBR, resolveGoogleCoordinates, getCityAnchor } from '../../lib/geocoding';
 import { optimizeRouteStops } from '../../lib/routeOptimizer';
+import { ConfirmModal } from '../common/ConfirmModal';
 import {
   MapPin,
   Building2,
@@ -20,19 +21,27 @@ import {
   Compass,
   Check,
   X,
+  Trash2,
 } from 'lucide-react';
 
 interface RouteBuilderProps {
   route: Route;
   onUpdateRoute: (updated: Route) => void;
   onOpenOcrModal: () => void;
+  onClearRoute?: () => void;
+  companyBases: CompanyBase[];
+  currentUser: UserProfile;
 }
 
 export const RouteBuilder: React.FC<RouteBuilderProps> = ({
   route,
   onUpdateRoute,
   onOpenOcrModal,
+  onClearRoute,
+  companyBases,
+  currentUser,
 }) => {
+  const [showConfirmClear, setShowConfirmClear] = useState(false);
   // Base addresses state
   const [startAddress, setStartAddress] = useState(route.startAddress);
   const [endAddress, setEndAddress] = useState(route.endAddress);
@@ -53,6 +62,30 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
   const [notes, setNotes] = useState('');
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [showAddSuccess, setShowAddSuccess] = useState(false);
+
+  // Auto-sync company base and driver home if start/end address are not yet configured
+  useEffect(() => {
+    if (!startAddress && companyBases && companyBases.length > 0) {
+      const defaultBase = companyBases.find((b) => b.isDefault) || companyBases[0];
+      setStartAddress(defaultBase.address);
+      onUpdateRoute({
+        ...route,
+        startAddress: defaultBase.address,
+        startCoords: defaultBase.coords,
+      });
+    }
+  }, [companyBases]);
+
+  useEffect(() => {
+    if (!endAddress && currentUser && currentUser.homeAddress && currentUser.homeCoords) {
+      setEndAddress(currentUser.homeAddress);
+      onUpdateRoute({
+        ...route,
+        endAddress: currentUser.homeAddress,
+        endCoords: currentUser.homeCoords,
+      });
+    }
+  }, [currentUser]);
 
   // Debounce for Start Address Autocomplete
   useEffect(() => {
@@ -249,7 +282,7 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Start Address (Company CD) */}
           <div className="relative">
             <label className="block text-xs font-bold text-emerald-400 mb-1 flex items-center justify-between">
@@ -263,12 +296,58 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
                 </span>
               )}
             </label>
+
+            {/* Quick Select Options registered by Manager */}
+            {companyBases.length > 0 ? (
+              <div className="mb-2 space-y-1">
+                <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                  <Building2 className="w-3 h-3 text-emerald-400" />
+                  <span>Bases Cadastradas pelo Gestor:</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {companyBases.map((b) => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => {
+                        setStartAddress(b.address);
+                        setStartSuggestions([]);
+                        onUpdateRoute({
+                          ...route,
+                          startAddress: b.address,
+                          startCoords: b.coords,
+                        });
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        startAddress === b.address
+                          ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                          : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-700 hover:border-emerald-500/50'
+                      }`}
+                    >
+                      <Building2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>{b.name}</span>
+                      {b.isDefault && (
+                        <span className="text-[9px] bg-emerald-500/30 text-emerald-300 px-1 rounded">
+                          Padrão
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="mb-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>Nenhuma base cadastrada pelo gestor. Digite abaixo ou solicite o cadastro.</span>
+              </div>
+            )}
+
             <div className="relative flex items-center">
               <input
                 type="text"
                 value={startAddress}
                 onChange={(e) => setStartAddress(e.target.value)}
-                placeholder="Digite nome da empresa, galpão ou rua..."
+                placeholder="Ou digite outro endereço de partida..."
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 pl-3 pr-14 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
               />
               <div className="absolute right-2 flex items-center gap-1">
@@ -334,12 +413,75 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
                 </span>
               )}
             </label>
+
+            {/* Quick Select Options registered by Manager */}
+            <div className="mb-2 space-y-1">
+              <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                <Home className="w-3 h-3 text-purple-400" />
+                <span>Destino / Retorno Cadastrado pelo Gestor:</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {currentUser.homeAddress ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEndAddress(currentUser.homeAddress!);
+                      setEndSuggestions([]);
+                      onUpdateRoute({
+                        ...route,
+                        endAddress: currentUser.homeAddress!,
+                        endCoords: currentUser.homeCoords || route.endCoords,
+                      });
+                    }}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      endAddress === currentUser.homeAddress
+                        ? 'bg-purple-600 text-white shadow-sm ring-1 ring-purple-400'
+                        : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-700 hover:border-purple-500/50'
+                    }`}
+                  >
+                    <Home className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    <span>Minha Residência ({currentUser.homeAddress.split(',')[0]})</span>
+                  </button>
+                ) : (
+                  <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Sua residência não está cadastrada pelo gestor. Digite abaixo ou solicite o cadastro.</span>
+                  </div>
+                )}
+
+                {companyBases.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const defaultBase =
+                        companyBases.find((b) => b.isDefault) || companyBases[0];
+                      setEndAddress(defaultBase.address);
+                      setEndSuggestions([]);
+                      onUpdateRoute({
+                        ...route,
+                        endAddress: defaultBase.address,
+                        endCoords: defaultBase.coords,
+                      });
+                    }}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      companyBases.some((b) => b.address === endAddress)
+                        ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                        : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    <Building2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Retornar à Base da Empresa</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div className="relative flex items-center">
               <input
                 type="text"
                 value={endAddress}
                 onChange={(e) => setEndAddress(e.target.value)}
-                placeholder="Digite sua rua, bairro ou CEP residencial..."
+                placeholder="Ou digite outro endereço de chegada/retorno..."
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl py-2 pl-3 pr-14 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
               />
               <div className="absolute right-2 flex items-center gap-1">
@@ -405,15 +547,29 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
           <span>Escanear / Galeria de Romaneio (OCR com IA)</span>
         </button>
 
-        <button
-          type="button"
-          onClick={handleOptimizeRoute}
-          disabled={route.stops.length < 2}
-          className="px-5 py-3 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-950 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
-        >
-          <Zap className="w-4 h-4 fill-slate-950" />
-          <span>Calcular Rota Mais Eficiente</span>
-        </button>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          {onClearRoute && route.stops.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowConfirmClear(true)}
+              className="px-3.5 py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              title="Apagar todas as paradas da rota ativa"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Apagar Rota Ativa ({route.stops.length})</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleOptimizeRoute}
+            disabled={route.stops.length < 2}
+            className="px-5 py-3 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-950 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+          >
+            <Zap className="w-4 h-4 fill-slate-950" />
+            <span>Calcular Rota Mais Eficiente</span>
+          </button>
+        </div>
       </div>
 
       {/* 3. Manual Stop Registration Form */}
@@ -601,6 +757,21 @@ export const RouteBuilder: React.FC<RouteBuilderProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Confirmation Modal to Clear Active Route */}
+      <ConfirmModal
+        isOpen={showConfirmClear}
+        title="Apagar Rota Ativa Atual?"
+        description={`Tem certeza que deseja apagar a rota ativa com ${route.stops.length} parada(s)? Todas as entregas cadastradas, valores calculados e o traçado de GPS serão limpos para você iniciar um novo romaneio.`}
+        confirmLabel="Sim, Apagar Rota Ativa"
+        cancelLabel="Cancelar"
+        variant="danger"
+        onConfirm={() => {
+          setShowConfirmClear(false);
+          onClearRoute?.();
+        }}
+        onCancel={() => setShowConfirmClear(false)}
+      />
     </div>
   );
 };

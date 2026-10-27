@@ -19,8 +19,14 @@ service cloud.firestore {
     // User profiles
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && (request.auth.uid == userId || isOwner(userId));
+      allow create, update: if isSignedIn();
       allow delete: if false;
+    }
+
+    // Company Bases (CDs and distribution warehouses)
+    match /company_bases/{baseId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
     }
 
     // Fleet Vehicles
@@ -42,6 +48,20 @@ service cloud.firestore {
         allow create, update: if isSignedIn();
         allow delete: if isSignedIn();
       }
+    }
+
+    // Maintenance Records
+    match /maintenance/{recordId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    // Daily Closure Deletion Requests
+    match /closure_deletion_requests/{requestId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn();
     }
   }
 }

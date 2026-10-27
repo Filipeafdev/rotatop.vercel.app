@@ -2,7 +2,17 @@
  * Rotatop - Sistema de Gestão Logística, Romaneios Inteligentes e Controle de Fretes
  */
 import React, { useState, useEffect } from 'react';
-import { Route, Stop, UserProfile, UserRole, Vehicle, ManifestItemDraft } from './types';
+import {
+  Route,
+  Stop,
+  UserProfile,
+  UserRole,
+  Vehicle,
+  ManifestItemDraft,
+  MaintenanceRecord,
+  ClosureDeletionRequest,
+  CompanyBase,
+} from './types';
 import { storage } from './lib/storage';
 import { optimizeRouteStops } from './lib/routeOptimizer';
 import { getCityAnchor } from './lib/geocoding';
@@ -12,10 +22,12 @@ import { StopCard } from './components/driver/StopCard';
 import { LiveRouteExecution } from './components/driver/LiveRouteExecution';
 import { RouteBuilder } from './components/driver/RouteBuilder';
 import { FinancialSummary } from './components/driver/FinancialSummary';
+import { MaintenanceView } from './components/driver/MaintenanceView';
 import { OcrManifestModal } from './components/driver/OcrManifestModal';
 import { ManagerDashboard } from './components/manager/ManagerDashboard';
 import { DailyReportView } from './components/reports/DailyReportView';
 import { AuthModal } from './components/auth/AuthModal';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import {
   Truck,
   Map as MapIcon,
@@ -28,6 +40,7 @@ import {
   RotateCcw,
   Sparkles,
   Zap,
+  Wrench,
 } from 'lucide-react';
 
 export default function App() {
@@ -35,11 +48,15 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile>(storage.getCurrentUser());
   const [currentRole, setCurrentRole] = useState<UserRole>(currentUser.role);
   const [vehicles, setVehicles] = useState<Vehicle[]>(storage.getVehicles());
+  const [companyBases, setCompanyBases] = useState<CompanyBase[]>(storage.getCompanyBases());
+  const [drivers, setDrivers] = useState<UserProfile[]>(storage.getDrivers());
   const [activeRoute, setActiveRoute] = useState<Route>(storage.getActiveRoute());
   const [historicalRoutes, setHistoricalRoutes] = useState<Route[]>(storage.getHistoricalRoutes());
+  const [maintenances, setMaintenances] = useState<MaintenanceRecord[]>(storage.getMaintenanceRecords());
+  const [deletionRequests, setDeletionRequests] = useState<ClosureDeletionRequest[]>(storage.getDeletionRequests());
 
   // UI Modals & Navigation
-  const [driverTab, setDriverTab] = useState<'execucao' | 'mapa' | 'builder' | 'financeiro' | 'relatorios'>('execucao');
+  const [driverTab, setDriverTab] = useState<'execucao' | 'mapa' | 'builder' | 'financeiro' | 'relatorios' | 'manutencao'>('execucao');
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -71,10 +88,167 @@ export default function App() {
     showToast('Frota atualizada com sucesso!');
   };
 
+  // Save company bases
+  const handleSaveCompanyBases = (updatedBases: CompanyBase[]) => {
+    setCompanyBases(updatedBases);
+    storage.saveCompanyBases(updatedBases);
+    showToast('Bases da empresa salvas com sucesso!');
+  };
+
+  // Save drivers & home addresses
+  const handleSaveDrivers = (updatedDrivers: UserProfile[]) => {
+    setDrivers(updatedDrivers);
+    storage.saveDrivers(updatedDrivers);
+
+    // If current logged-in driver's home address or data was modified by manager, sync
+    const currentUpdated = updatedDrivers.find((d) => d.uid === currentUser.uid);
+    if (currentUpdated) {
+      setCurrentUser(currentUpdated);
+      storage.saveCurrentUser(currentUpdated);
+    }
+    showToast('Cadastro de motoristas e residências atualizado!');
+  };
+
   // Save active route
   const handleUpdateRoute = (updatedRoute: Route) => {
     setActiveRoute(updatedRoute);
     storage.saveActiveRoute(updatedRoute);
+  };
+
+  // Clear Active Route with Confirmation
+  const handleClearActiveRoute = () => {
+    const cleared = storage.clearActiveRoute();
+    setActiveRoute(cleared);
+    showToast('Rota ativa apagada com sucesso!');
+  };
+
+  // Maintenance handlers
+  const handleAddMaintenance = (record: MaintenanceRecord) => {
+    const updated = storage.addMaintenanceRecord(record);
+    setMaintenances(updated);
+    showToast(`Manutenção do veículo ${record.vehiclePlate} registrada!`);
+  };
+
+  const handleSaveMaintenances = (updated: MaintenanceRecord[]) => {
+    storage.saveMaintenanceRecords(updated);
+    setMaintenances(updated);
+    showToast('Histórico de manutenção atualizado!');
+  };
+
+  // Daily Closure Deletion Approval Workflow
+  const handleRequestDeleteClosure = (routeId: string, reason: string) => {
+    const targetRoute =
+      historicalRoutes.find((r) => r.id === routeId) ||
+      (activeRoute.id === routeId ? activeRoute : null);
+
+    if (!targetRoute) return;
+
+    const newRequest: ClosureDeletionRequest = {
+      id: `del-req-${Date.now()}`,
+      routeId,
+      date: targetRoute.date,
+      driverId: currentUser.uid,
+      driverName: currentUser.displayName,
+      vehiclePlate: targetRoute.vehiclePlate,
+      totalKm: targetRoute.totalKm,
+      deliveredValue: targetRoute.deliveredValue,
+      reason,
+      status: 'pendente',
+      requestedAt: new Date().toISOString(),
+    };
+
+    const updatedRequests = [newRequest, ...deletionRequests];
+    storage.saveDeletionRequests(updatedRequests);
+    setDeletionRequests(updatedRequests);
+
+    // Update target route's status to 'aguardando_exclusao'
+    const updateRouteData = (r: Route) =>
+      r.id === routeId
+        ? {
+            ...r,
+            status: 'aguardando_exclusao' as const,
+            deletionReason: reason,
+            deletionRequestId: newRequest.id,
+            updatedAt: new Date().toISOString(),
+          }
+        : r;
+
+    if (activeRoute.id === routeId) {
+      const updatedActive = updateRouteData(activeRoute);
+      setActiveRoute(updatedActive);
+      storage.saveActiveRoute(updatedActive);
+    }
+
+    const updatedHistory = historicalRoutes.map(updateRouteData);
+    setHistoricalRoutes(updatedHistory);
+    storage.saveHistoricalRoutes(updatedHistory);
+
+    showToast('Solicitação de exclusão enviada ao gestor com sucesso!');
+  };
+
+  const handleApproveClosureDeletion = (requestId: string) => {
+    const targetReq = deletionRequests.find((r) => r.id === requestId);
+    if (!targetReq) return;
+
+    const updatedRequests = deletionRequests.map((r) =>
+      r.id === requestId
+        ? {
+            ...r,
+            status: 'aprovada' as const,
+            resolvedAt: new Date().toISOString(),
+            resolvedBy: currentUser.displayName,
+          }
+        : r
+    );
+    storage.saveDeletionRequests(updatedRequests);
+    setDeletionRequests(updatedRequests);
+
+    // Remove route permanently from history
+    const updatedHistory = historicalRoutes.filter((r) => r.id !== targetReq.routeId);
+    setHistoricalRoutes(updatedHistory);
+    storage.saveHistoricalRoutes(updatedHistory);
+
+    // If active route was the one deleted, reset it
+    if (activeRoute.id === targetReq.routeId) {
+      handleClearActiveRoute();
+    }
+
+    showToast(`Exclusão de fechamento aprovada!`);
+  };
+
+  const handleRejectClosureDeletion = (requestId: string, notes?: string) => {
+    const targetReq = deletionRequests.find((r) => r.id === requestId);
+    if (!targetReq) return;
+
+    const updatedRequests = deletionRequests.map((r) =>
+      r.id === requestId
+        ? {
+            ...r,
+            status: 'rejeitada' as const,
+            resolvedAt: new Date().toISOString(),
+            resolvedBy: currentUser.displayName,
+            managerNotes: notes,
+          }
+        : r
+    );
+    storage.saveDeletionRequests(updatedRequests);
+    setDeletionRequests(updatedRequests);
+
+    // Revert route status back to 'concluida'
+    const revertRoute = (r: Route) =>
+      r.id === targetReq.routeId ? { ...r, status: 'concluida' as const } : r;
+
+    if (activeRoute.id === targetReq.routeId) {
+      const reverted = revertRoute(activeRoute);
+      setActiveRoute(reverted);
+      storage.saveActiveRoute(reverted);
+    }
+
+    const updatedHistory = historicalRoutes.map(revertRoute);
+    setHistoricalRoutes(updatedHistory);
+    storage.saveHistoricalRoutes(updatedHistory);
+
+    showToast(`Solicitação de exclusão recusada. Fechamento mantido.`);
   };
 
   // 1. Finish Stop
@@ -244,20 +418,30 @@ export default function App() {
     const isReplacingInitialSample = activeRoute.stops.some((s) => s.id.startsWith('init-stop'));
     const stopsToUse = isReplacingInitialSample ? newStops : [...activeRoute.stops, ...newStops];
 
-    // If imported stops are in Campinas/interior region and route origin is still default São Paulo CD:
+    // Origin / Destination resolution:
+    // If company bases are registered by the gestor, prioritize the default base
     let startCoords = activeRoute.startCoords;
     let startAddress = activeRoute.startAddress;
     let endCoords = activeRoute.endCoords;
     let endAddress = activeRoute.endAddress;
 
-    if (
-      startAddress.includes('São Paulo') &&
-      (detectedCity.toLowerCase().includes('campinas') || newStops.some((s) => s.lat > -23.1))
-    ) {
-      startAddress = 'CD Central Campinas - Rod. Anhanguera, km 98, Campinas - SP';
-      startCoords = { lat: -22.9152, lng: -47.0854 };
-      endAddress = 'Base Operacional Campinas - Av. Prestes Maia, 1200, Campinas - SP';
-      endCoords = { lat: -22.9254, lng: -47.0701 };
+    const defaultBase = companyBases.find((b) => b.isDefault) || companyBases[0];
+    if (defaultBase && (!startAddress || startAddress.trim() === '')) {
+      startAddress = `${defaultBase.name} - ${defaultBase.address}`;
+      startCoords = defaultBase.coords;
+    } else if (!startAddress || startAddress.trim() === '') {
+      // Default to detected city center
+      startAddress = `CD Regional ${detectedCity}`;
+      startCoords = cityAnchor;
+    }
+
+    // For end address: if driver home address is registered and route end is empty, set it
+    if (currentUser.homeAddress && (!endAddress || endAddress.trim() === '')) {
+      endAddress = `Residência: ${currentUser.homeAddress}`;
+      endCoords = currentUser.homeCoords || startCoords;
+    } else if (!endAddress || endAddress.trim() === '') {
+      endAddress = startAddress;
+      endCoords = startCoords;
     }
 
     const totalWeightSum = stopsToUse.reduce((acc, s) => acc + s.totalWeight, 0);
@@ -307,7 +491,8 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950 pb-16">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950 pb-16">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-20 right-4 z-50 bg-slate-900 border border-amber-500/50 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-top-2">
@@ -398,6 +583,18 @@ export default function App() {
                 <FileText className="w-4 h-4" />
                 <span>Fechamento do Dia</span>
               </button>
+
+              <button
+                onClick={() => setDriverTab('manutencao')}
+                className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shrink-0 transition-all cursor-pointer ${
+                  driverTab === 'manutencao'
+                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                    : 'bg-slate-900/80 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                <Wrench className="w-4 h-4" />
+                <span>Manutenção ({maintenances.length})</span>
+              </button>
             </div>
 
             {/* TAB CONTENT: Execução & Paradas */}
@@ -407,6 +604,7 @@ export default function App() {
                 <LiveRouteExecution
                   route={activeRoute}
                   onFinishEntireRoute={handleFinishEntireRoute}
+                  onClearRoute={handleClearActiveRoute}
                 />
 
                 {/* Compact Interactive Map View for Quick Orientation */}
@@ -521,6 +719,9 @@ export default function App() {
                   route={activeRoute}
                   onUpdateRoute={handleUpdateRoute}
                   onOpenOcrModal={() => setIsOcrModalOpen(true)}
+                  onClearRoute={handleClearActiveRoute}
+                  companyBases={companyBases}
+                  currentUser={currentUser}
                 />
               </div>
             )}
@@ -553,12 +754,25 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB CONTENT: Relatórios Diários */}
+            {/* TAB CONTENT: Relatórios Diários / Fechamento */}
             {driverTab === 'relatorios' && (
               <div className="animate-in fade-in">
                 <DailyReportView
                   activeRoute={activeRoute}
                   historicalRoutes={historicalRoutes}
+                  onRequestDeleteRoute={handleRequestDeleteClosure}
+                />
+              </div>
+            )}
+
+            {/* TAB CONTENT: Manutenções Lançadas pelo Motorista */}
+            {driverTab === 'manutencao' && (
+              <div className="animate-in fade-in">
+                <MaintenanceView
+                  currentUser={currentUser}
+                  vehicles={vehicles}
+                  maintenances={maintenances}
+                  onAddMaintenance={handleAddMaintenance}
                 />
               </div>
             )}
@@ -573,25 +787,39 @@ export default function App() {
               onSaveVehicles={handleSaveVehicles}
               activeRoute={activeRoute}
               historicalRoutes={historicalRoutes}
+              maintenances={maintenances}
+              onSaveMaintenances={handleSaveMaintenances}
+              deletionRequests={deletionRequests}
+              onApproveDeletion={handleApproveClosureDeletion}
+              onRejectDeletion={handleRejectClosureDeletion}
+              companyBases={companyBases}
+              onSaveCompanyBases={handleSaveCompanyBases}
+              drivers={drivers}
+              onSaveDrivers={handleSaveDrivers}
             />
           </div>
         )}
       </main>
 
-      {/* OCR Intelligent Manifest Modal */}
-      <OcrManifestModal
-        isOpen={isOcrModalOpen}
-        onClose={() => setIsOcrModalOpen(false)}
-        onImportStops={handleImportOcrStops}
-      />
+        {/* OCR Intelligent Manifest Modal */}
+        {isOcrModalOpen && (
+          <OcrManifestModal
+            isOpen={isOcrModalOpen}
+            onClose={() => setIsOcrModalOpen(false)}
+            onImportStops={handleImportOcrStops}
+          />
+        )}
 
-      {/* Account & Profile Switcher Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        currentUser={currentUser}
-        onSelectUser={handleSelectUser}
-      />
-    </div>
+        {/* Account & Profile Switcher Modal */}
+        {isAuthModalOpen && (
+          <AuthModal
+            isOpen={isAuthModalOpen}
+            onClose={() => setIsAuthModalOpen(false)}
+            currentUser={currentUser}
+            onSelectUser={handleSelectUser}
+          />
+        )}
+      </div>
+    </ErrorBoundary>
   );
 }

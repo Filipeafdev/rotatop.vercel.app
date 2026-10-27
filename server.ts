@@ -204,14 +204,11 @@ Retorne ESTRITAMENTE um array JSON contendo os objetos com os campos:
 
 Não inclua nenhum texto antes ou depois do JSON.`;
 
-    // Model fallback pool - prioritizes fast, high-availability models with LOW thinking
+    // Model pool using valid @google/genai models
     const modelPool = [
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3.7-flash',
       'gemini-3.8-flash',
-      'gemini-3.1-flash-lite',
       'gemini-flash-latest',
+      'gemini-3.1-flash-lite',
     ];
 
     let extractedText = '';
@@ -251,7 +248,7 @@ Não inclua nenhum texto antes ou depois do JSON.`;
         lastError = err;
         console.warn(`[OCR] Model ${modelName} error:`, err?.message || err);
         // Short backoff before next model attempt
-        await new Promise((resolve) => setTimeout(resolve, 400));
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
     }
 

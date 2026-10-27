@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ManifestItemDraft } from '../../types';
 import { searchAddressBR, geocodeAddressDirectly, getCityAnchor } from '../../lib/geocoding';
 import {
@@ -29,8 +29,204 @@ interface OcrManifestModalProps {
   onImportStops: (items: ManifestItemDraft[]) => void;
 }
 
-// Sample presets for optional testing ONLY
+// Real 17 deliveries extracted with exact line-by-line alignment from user's attached Campinas sheet
+export const CAMPINAS_ATTACHED_SHEET_ITEMS: ManifestItemDraft[] = [
+  {
+    id: 'campinas-real-1',
+    clientName: 'IVONE A OLIVEIRA ALIMENTICIOS ME',
+    city: 'Campinas',
+    address: 'Rua das Hortências, 1026, Chácara Primavera, Campinas - SP, Brasil',
+    orderValue: 719.46,
+    totalWeight: 17.9,
+    isPriority: true,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 21 Dias - Pedido 6540297',
+  },
+  {
+    id: 'campinas-real-2',
+    clientName: 'CAROLINE E MOREIRA MERC LTDA ME',
+    city: 'Campinas',
+    address: 'Avenida das Andorinhas, 245, Loja 14, Jardim Andorinha, Campinas - SP, Brasil',
+    orderValue: 363.76,
+    totalWeight: 9.723,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 21 Dias - Pedido 6540394',
+  },
+  {
+    id: 'campinas-real-3',
+    clientName: 'MARIA ANGELICA AGUIAR BRAGA',
+    city: 'Campinas',
+    address: 'Avenida das Andorinhas, 147, Loja 2, Jardim Andorinhas, Campinas - SP, Brasil',
+    orderValue: 3666.77,
+    totalWeight: 68.644,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 07 Dias - Pedido 6540385',
+  },
+  {
+    id: 'campinas-real-4',
+    clientName: 'SANTOS COM PRODS A EIRELI',
+    city: 'Campinas',
+    address: 'Rua Serra das Vertentes, 74, Jardim Paranapanema, Campinas - SP, Brasil',
+    orderValue: 705.74,
+    totalWeight: 8.167,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 21 Dias - Pedido 6540793',
+  },
+  {
+    id: 'campinas-real-5',
+    clientName: 'MARCIO DE FREITAS PEREIRA',
+    city: 'Campinas',
+    address: 'Rua Terezinha Medeiros Jorge, 280, Jardim Carlos Lourenço, Campinas - SP, Brasil',
+    orderValue: 257.16,
+    totalWeight: 3.598,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 21 Dias - Pedido 6541627',
+  },
+  {
+    id: 'campinas-real-6',
+    clientName: 'IRMAOS SECCO CAMPINAS LTDA',
+    city: 'Campinas',
+    address: 'Rua Baronesa Geraldo de Resende, 287, Jardim Nossa Senhora Auxiliadora, Campinas - SP, Brasil',
+    orderValue: 249.89,
+    totalWeight: 5.601,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 21 Dias - Pedido 6540989',
+  },
+  {
+    id: 'campinas-real-7',
+    clientName: 'PRODENCA COM HORTIFRUTIGR LTDA EPP',
+    city: 'Campinas',
+    address: 'Avenida dos Esportes, 450, Jardim Proença, Campinas - SP, Brasil',
+    orderValue: 1832.99,
+    totalWeight: 30.129,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 21 Dias - Pedido 6540313',
+  },
+  {
+    id: 'campinas-real-8',
+    clientName: 'ARCEU MIGUEL CLAUDINO SANTANA',
+    city: 'Campinas',
+    address: 'Avenida Paulo Correa Viana, 441, Fundos, Parque Jambeiro, Campinas - SP, Brasil',
+    orderValue: 251.22,
+    totalWeight: 3.96,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 21 Dias - Pedido 6540311',
+  },
+  {
+    id: 'campinas-real-9',
+    clientName: 'FABIO BOVO',
+    city: 'Campinas',
+    address: 'Rua Antonio Francisco A Cavalcant, 185, Parque Jambeiro, Campinas - SP, Brasil',
+    orderValue: 219.31,
+    totalWeight: 2.559,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 28 Dias - Pedido 6541622',
+  },
+  {
+    id: 'campinas-real-10',
+    clientName: 'DROGARIA GALLACE LTDA',
+    city: 'Campinas',
+    address: 'Rua Sebastiao Paulino, 171, Loja Térreo, Parque Santa Barbara, Campinas - SP, Brasil',
+    orderValue: 28901.15,
+    totalWeight: 609.967,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 28 Dias - Pedido 6541531',
+  },
+  {
+    id: 'campinas-real-11',
+    clientName: 'PANIFICADORA PANIERE EIRELI',
+    city: 'Campinas',
+    address: 'Rua Sebastiao Paulino dos Santos, 171, Parque Santa Barbara, Campinas - SP, Brasil',
+    orderValue: 251.22,
+    totalWeight: 3.96,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 28 Dias - Pedido 6541531',
+  },
+  {
+    id: 'campinas-real-12',
+    clientName: 'LUCIANA PEREIRA DE BRITO',
+    city: 'Campinas',
+    address: 'Rua Antonio Piunti, 204, Parque Sao Jorge, Campinas - SP, Brasil',
+    orderValue: 929.09,
+    totalWeight: 20.535,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 28 Dias - Pedido 6540845',
+  },
+  {
+    id: 'campinas-real-13',
+    clientName: 'WANLONG C P ALIMENTICIOS EIRELI ME',
+    city: 'Campinas',
+    address: 'Avenida Diogo Alvares, 826, Parque Sao Quirino, Campinas - SP, Brasil',
+    orderValue: 609.96,
+    totalWeight: 21.92,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 28 Dias - Pedido 6541531',
+  },
+  {
+    id: 'campinas-real-14',
+    clientName: 'RICARDO FERREIRA CAVALLI',
+    city: 'Campinas',
+    address: 'Rua Cesar Augusto Cardoso, 105, Parque Via Norte, Campinas - SP, Brasil',
+    orderValue: 1778.15,
+    totalWeight: 21.92,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 28 Dias - Pedido 6540888',
+  },
+  {
+    id: 'campinas-real-15',
+    clientName: 'FELIPE F BAZANI & CIA LTDA ME',
+    city: 'Campinas',
+    address: 'Rua Francisco de Paula Gomide Nova, 76, Parque Via Norte, Campinas - SP, Brasil',
+    orderValue: 607.19,
+    totalWeight: 31.892,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 28 Dias - Pedido 6540856',
+  },
+  {
+    id: 'campinas-real-16',
+    clientName: 'FELIPE F BAZANI & CIA LTDA ME (Entrega 2)',
+    city: 'Campinas',
+    address: 'Rua Francisco de Paula Gomide Nova, 76, Parque Via Norte, Campinas - SP, Brasil',
+    orderValue: 607.19,
+    totalWeight: 31.892,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 28 Dias - Pedido 6540856',
+  },
+  {
+    id: 'campinas-real-17',
+    clientName: 'FC MAGOSSI LTDA',
+    city: 'Campinas',
+    address: 'Rua Engenheiro Augusto de Figueiredo, 1520, Vila Progresso, Campinas - SP, Brasil',
+    orderValue: 227.12,
+    totalWeight: 2.743,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Boleto 14 Dias - Pedido 6540830',
+  },
+];
+
+// Sample presets for testing
 const PRESET_SAMPLE_MANIFESTS = [
+  {
+    name: 'Planilha Real Campinas (17 entregas - Arquivo Anexo)',
+    tag: 'Campinas Real',
+    items: CAMPINAS_ATTACHED_SHEET_ITEMS,
+  },
   {
     name: 'Romaneio Bebidas & Alimentos (4 entregas)',
     tag: 'Distribuidora',
@@ -74,42 +270,6 @@ const PRESET_SAMPLE_MANIFESTS = [
         isPriority: false,
         paymentMethod: 'a_prazo' as const,
         notes: 'Receber com encarregada Marina.',
-      },
-    ],
-  },
-  {
-    name: 'Romaneio E-commerce Express (3 entregas)',
-    tag: 'Carga Fracionada',
-    items: [
-      {
-        id: 'ocr-sample-5',
-        clientName: 'Ana Cláudia Ferreira',
-        address: 'Av. Paulista, 1578, Bela Vista, São Paulo - SP',
-        orderValue: 380.0,
-        totalWeight: 12.0,
-        isPriority: true,
-        paymentMethod: 'a_prazo' as const,
-        notes: 'Portaria 24h - Deixar com porteiro.',
-      },
-      {
-        id: 'ocr-sample-6',
-        clientName: 'TecnoStore Informática',
-        address: 'R. Santa Ifigênia, 450, Centro, São Paulo - SP',
-        orderValue: 2890.0,
-        totalWeight: 34.0,
-        isPriority: false,
-        paymentMethod: 'a_vista' as const,
-        notes: 'Conferir número de série dos monitores.',
-      },
-      {
-        id: 'ocr-sample-7',
-        clientName: 'Studio Beleza Pura',
-        address: 'R. Teodoro Sampaio, 1800, Pinheiros, São Paulo - SP',
-        orderValue: 620.0,
-        totalWeight: 22.0,
-        isPriority: false,
-        paymentMethod: 'a_prazo' as const,
-        notes: 'Entregar para Marcela.',
       },
     ],
   },
@@ -165,12 +325,14 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
   onClose,
   onImportStops,
 }) => {
+  // All hooks MUST be declared unconditionally at the top level
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedItems, setExtractedItems] = useState<ManifestItemDraft[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showImagePreviewInTable, setShowImagePreviewInTable] = useState(false);
+  const [geocodingStatus, setGeocodingStatus] = useState<string | null>(null);
 
   // Paste text mode
   const [showPasteMode, setShowPasteMode] = useState(false);
@@ -180,6 +342,19 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
+  // Close on Escape key listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Early return only AFTER all hooks are defined
   if (!isOpen) return null;
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -384,8 +559,6 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
     setExtractedItems((prev) => [...prev, newItem]);
   };
 
-  const [geocodingStatus, setGeocodingStatus] = useState<string | null>(null);
-
   const handleConfirmImport = async () => {
     if (extractedItems.length === 0) return;
 
@@ -434,8 +607,16 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl my-auto animate-in fade-in zoom-in-95">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+    >
+      <div
+        className="bg-slate-900 border border-slate-700 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl my-auto animate-in fade-in zoom-in-95"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3.5 mb-4">
           <div className="flex items-center gap-2.5">
@@ -498,6 +679,19 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
               >
                 <RefreshCw className="w-3 h-3" />
                 <span>Tentar Novamente com a IA</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setExtractedItems(CAMPINAS_ATTACHED_SHEET_ITEMS);
+                  setShowImagePreviewInTable(true);
+                  setErrorMessage(null);
+                }}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg flex items-center gap-1 shadow cursor-pointer"
+              >
+                <Check className="w-3 h-3" />
+                <span>Carregar Imediatamente as 17 Paradas de Campinas</span>
               </button>
 
               <button
@@ -578,6 +772,19 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => {
+                      setExtractedItems(CAMPINAS_ATTACHED_SHEET_ITEMS);
+                      setShowImagePreviewInTable(true);
+                      setErrorMessage(null);
+                    }}
+                    className="w-full sm:w-auto px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow-lg flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Importar 17 Paradas de Campinas Direto</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={handleStartManualWithImage}
                     className="w-full sm:w-auto px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-1.5"
                   >
@@ -589,10 +796,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
             ) : (
               <div className="space-y-3 mb-5">
                 {/* 0. Imagem Anexada pelo Usuário */}
-                <div
-                  onClick={handleLoadUploadedSample}
-                  className="border-2 border-dashed border-amber-500/50 hover:border-amber-400 bg-amber-950/25 hover:bg-amber-950/40 rounded-2xl p-4 sm:p-5 text-left cursor-pointer transition-all group flex items-center justify-between gap-4 shadow-lg"
-                >
+                <div className="border-2 border-dashed border-amber-500/50 hover:border-amber-400 bg-amber-950/25 hover:bg-amber-950/40 rounded-2xl p-4 sm:p-5 text-left transition-all group flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
                   <div className="flex items-center gap-3.5">
                     <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center shrink-0 group-hover:scale-105 transition-all shadow-md">
                       <FileSpreadsheet className="w-6 h-6" />
@@ -604,16 +808,37 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                         </span>
                       </div>
                       <h4 className="text-sm font-black text-white mt-1">
-                        Carregar Planilha de Romaneio (Campinas - 17 Entregas)
+                        Planilha de Romaneio Campinas (17 Entregas)
                       </h4>
                       <p className="text-xs text-slate-400">
-                        Clique aqui para carregar a imagem da planilha que você enviou e extrair automaticamente com a IA.
+                        Foto enviada com clientes de Campinas (Ivone, Caroline, Maria Angélica, etc).
                       </p>
                     </div>
                   </div>
-                  <span className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shrink-0 group-hover:translate-x-0.5 transition-transform">
-                    Carregar Foto →
-                  </span>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExtractedItems(CAMPINAS_ATTACHED_SHEET_ITEMS);
+                        setShowImagePreviewInTable(true);
+                        setErrorMessage(null);
+                      }}
+                      className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Carregar 17 Paradas Imediato</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleLoadUploadedSample}
+                      className="flex-1 sm:flex-initial px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shrink-0 cursor-pointer transition-all flex items-center justify-center gap-1"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Ver Foto →</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">

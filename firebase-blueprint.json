@@ -11,6 +11,8 @@
         "role": { "type": "string", "enum": ["motorista", "gestor"] },
         "phone": { "type": "string" },
         "vehiclePlate": { "type": "string" },
+        "homeAddress": { "type": "string" },
+        "accessPassword": { "type": "string" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "email", "role"]
@@ -42,7 +44,7 @@
         "driverName": { "type": "string" },
         "vehiclePlate": { "type": "string" },
         "date": { "type": "string" },
-        "status": { "type": "string", "enum": ["planejada", "em_andamento", "concluida", "cancelada"] },
+        "status": { "type": "string", "enum": ["planejada", "em_andamento", "concluida", "cancelada", "aguardando_exclusao"] },
         "startAddress": { "type": "string" },
         "endAddress": { "type": "string" },
         "productiveKm": { "type": "number" },
@@ -55,6 +57,8 @@
         "totalValue": { "type": "number" },
         "deliveredWeight": { "type": "number" },
         "deliveredValue": { "type": "number" },
+        "deletionRequestId": { "type": "string" },
+        "deletionReason": { "type": "string" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
@@ -84,12 +88,79 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "routeId", "clientName", "address", "orderValue", "totalWeight", "status"]
+    },
+    "MaintenanceRecord": {
+      "title": "MaintenanceRecord",
+      "description": "Vehicle maintenance record logged by driver or manager for cost & km analysis",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "type": { "type": "string" },
+        "customTypeLabel": { "type": "string" },
+        "cost": { "type": "number" },
+        "kmAtMaintenance": { "type": "number" },
+        "date": { "type": "string" },
+        "workshopName": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "vehiclePlate", "cost", "kmAtMaintenance", "date"]
+    },
+    "CompanyBase": {
+      "title": "CompanyBase",
+      "description": "Company distribution center or warehouse base configured by manager",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "coords": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          },
+          "required": ["lat", "lng"]
+        },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "address", "coords"]
+    },
+    "ClosureDeletionRequest": {
+      "title": "ClosureDeletionRequest",
+      "description": "Workflow request to delete a daily closure awaiting manager approval",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "routeId": { "type": "string" },
+        "date": { "type": "string" },
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "totalKm": { "type": "number" },
+        "deliveredValue": { "type": "number" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["pendente", "aprovada", "rejeitada"] },
+        "requestedAt": { "type": "string" },
+        "resolvedAt": { "type": "string" },
+        "resolvedBy": { "type": "string" },
+        "managerNotes": { "type": "string" }
+      },
+      "required": ["id", "routeId", "reason", "status", "requestedAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "User profiles for authenticated drivers and managers"
+    },
+    "/company_bases/{baseId}": {
+      "schema": "CompanyBase",
+      "description": "Company distribution center / warehouse base locations"
     },
     "/vehicles/{vehicleId}": {
       "schema": "Vehicle",
@@ -102,6 +173,14 @@
     "/routes/{routeId}/stops/{stopId}": {
       "schema": "Stop",
       "description": "Delivery stops under a route"
+    },
+    "/maintenance/{recordId}": {
+      "schema": "MaintenanceRecord",
+      "description": "Fleet vehicle maintenance records"
+    },
+    "/closure_deletion_requests/{requestId}": {
+      "schema": "ClosureDeletionRequest",
+      "description": "Closure deletion requests awaiting manager approval"
     }
   }
 }
