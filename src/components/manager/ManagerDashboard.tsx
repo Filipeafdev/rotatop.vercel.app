@@ -13,6 +13,7 @@ import {
 import { MAINTENANCE_TYPE_LABELS } from '../driver/MaintenanceView';
 import { searchAddressBR, resolveGoogleCoordinates, getCityAnchor } from '../../lib/geocoding';
 import { ManifestViewerModal } from '../common/ManifestViewerModal';
+import { downloadFinancialClosurePdf } from '../../lib/pdfGenerator';
 import {
   Truck,
   Users,
@@ -23,6 +24,7 @@ import {
   Plus,
   Edit2,
   Trash2,
+  FileText,
   ShieldCheck,
   CheckCircle,
   AlertTriangle,
@@ -857,11 +859,39 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
               </div>
             </div>
 
-            <div className="text-xs font-bold text-slate-400 bg-slate-950 px-3.5 py-2 rounded-xl border border-slate-800 self-start sm:self-auto">
-              Total de Rotas com Romaneio:{' '}
-              <strong className="text-amber-400">
-                {[activeRoute, ...historicalRoutes].filter((r) => r.stops && r.stops.length > 0).length}
-              </strong>
+            <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  const routesToExport = [activeRoute, ...historicalRoutes].filter(
+                    (r) =>
+                      (r.stops && r.stops.length > 0) ||
+                      (r.manifestImages && r.manifestImages.length > 0)
+                  );
+                  downloadFinancialClosurePdf(
+                    routesToExport,
+                    {
+                      title: 'PRESTAÇÃO DE CONTAS - RELATÓRIO GERAL DA FROTA',
+                      subtitle: 'Consolidado Oficial de Fechamento Operacional e Financeiro',
+                      periodLabel: 'Histórico Geral de Rotas',
+                      companyName: 'ROTATOP - GESTÃO DE FROTAS',
+                    },
+                    'relatorio_geral_frota'
+                  );
+                }}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg shadow-rose-950/40 flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Exportar prestação de contas de toda a frota em PDF"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Exportar Relatório Geral (PDF)</span>
+              </button>
+
+              <div className="text-xs font-bold text-slate-400 bg-slate-950 px-3.5 py-2 rounded-xl border border-slate-800">
+                Rotas com Romaneio:{' '}
+                <strong className="text-amber-400">
+                  {[activeRoute, ...historicalRoutes].filter((r) => r.stops && r.stops.length > 0).length}
+                </strong>
+              </div>
             </div>
           </div>
 
@@ -925,15 +955,41 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
                           </div>
                         </div>
 
-                        {/* Button to View Scanned Manifest Images */}
-                        <button
-                          type="button"
-                          onClick={() => handleOpenManifestViewer(r)}
-                          className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-950 flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
-                        >
-                          <FileSpreadsheet className="w-4 h-4" />
-                          <span>Ver Romaneio Digitalizado ({imagesCount} foto{imagesCount > 1 ? 's' : ''})</span>
-                        </button>
+                        <div className="flex items-center gap-2 self-stretch sm:self-auto flex-wrap">
+                          {/* Button to Download Single Route PDF */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              downloadFinancialClosurePdf(
+                                [r],
+                                {
+                                  title: `COMPROVANTE DE FECHAMENTO - ROTA ${r.date}`,
+                                  subtitle: `Auditoria de Entregas, Odômetro e Combustível - Placa ${r.vehiclePlate}`,
+                                  periodLabel: r.date,
+                                  driverName: r.driverName,
+                                  vehiclePlate: r.vehiclePlate,
+                                  companyBaseAddress: r.startAddress,
+                                },
+                                `comprovante_rota_${r.date}_${r.vehiclePlate || 'veiculo'}`
+                              );
+                            }}
+                            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white border border-slate-700 hover:border-rose-500 font-bold text-xs rounded-xl shadow transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            title="Baixar comprovante individual desta rota em PDF"
+                          >
+                            <FileText className="w-4 h-4 text-rose-400" />
+                            <span>PDF</span>
+                          </button>
+
+                          {/* Button to View Scanned Manifest Images */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenManifestViewer(r)}
+                            className="flex-1 sm:flex-initial px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-950 flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
+                          >
+                            <FileSpreadsheet className="w-4 h-4" />
+                            <span>Ver Romaneio ({imagesCount} foto{imagesCount > 1 ? 's' : ''})</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Route Numbers & Metrics */}

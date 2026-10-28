@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Route } from '../../types';
+import { downloadFinancialClosurePdf } from '../../lib/pdfGenerator';
 import {
   Fuel,
   Gauge,
@@ -15,6 +16,7 @@ import {
   CheckCircle2,
   Calculator,
   ShieldCheck,
+  FileText,
 } from 'lucide-react';
 
 interface FinancialSummaryProps {
@@ -506,6 +508,45 @@ export const FinancialSummary: React.FC<FinancialSummaryProps> = ({
             </button>
           </div>
         </form>
+
+        {/* PDF Settlement Export Card */}
+        <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 shrink-0">
+              <FileText className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-black text-white block">
+                Prestação de Contas em Documento PDF
+              </span>
+              <p className="text-[11px] text-slate-400">
+                Gera o relatório com demonstrativo de hodômetro real, combustível e campos de assinatura para acerto com a frota.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              downloadFinancialClosurePdf(
+                [route],
+                {
+                  title: `PRESTAÇÃO DE CONTAS - ${route.driverName || 'MOTORISTA'}`,
+                  subtitle: `Fechamento Financeiro & Operacional da Rota do Dia ${route.date}`,
+                  periodLabel: route.date,
+                  driverName: route.driverName,
+                  vehiclePlate: route.vehiclePlate,
+                  companyBaseAddress: route.startAddress,
+                },
+                `prestacao_contas_${route.date}_${route.vehiclePlate || 'veiculo'}`
+              );
+            }}
+            className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg shadow-rose-950/40 transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+          >
+            <FileText className="w-4 h-4" />
+            <span>Exportar Prestação de Contas (PDF)</span>
+          </button>
+        </div>
       </div>
     </div>
   );

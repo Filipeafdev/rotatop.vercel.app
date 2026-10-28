@@ -29,7 +29,7 @@ import {
 interface OcrManifestModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImportStops: (items: ManifestItemDraft[], images?: string[]) => void;
+  onImportStops: (items: ManifestItemDraft[], images?: string[], appendMode?: boolean) => void;
   historicalRoutes?: Route[];
   activeRoute?: Route;
 }
@@ -342,6 +342,16 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showImagePreviewInTable, setShowImagePreviewInTable] = useState(false);
   const [geocodingStatus, setGeocodingStatus] = useState<string | null>(null);
+
+  // Active route pending stops that can be aggregated with the new manifest
+  const existingPendingStops =
+    activeRoute?.stops.filter(
+      (s) => (s.status === 'pendente' || s.status === 'reentregar') && !s.id.startsWith('init-stop')
+    ) || [];
+  const hasExistingPending = existingPendingStops.length > 0;
+  const [importMode, setImportMode] = useState<'append' | 'replace'>(
+    hasExistingPending ? 'append' : 'replace'
+  );
 
   // Helper: Detect if order was already delivered in previous closures
   const isDeliveredInHistory = (item: ManifestItemDraft) => {
@@ -711,7 +721,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
       capturedImages.length > 0
         ? capturedImages.map((img) => img.url)
         : ['/assets/aistudio/image_0f309c5a.png'];
-    onImportStops(resolvedItems, imagesToPass);
+    onImportStops(resolvedItems, imagesToPass, importMode === 'append');
     onClose();
   };
 
@@ -1537,6 +1547,51 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                 </div>
               )}
 
+              {/* Aggregation Mode Selector: Somar ao Romaneio Atual vs Iniciar Nova Rota */}
+              {hasExistingPending && (
+                <div className="mt-3.5 p-3.5 bg-amber-950/40 border border-amber-500/40 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl shrink-0">
+                      <Plus className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-amber-300 uppercase tracking-wide block">
+                        Você possui {existingPendingStops.length} entrega(s) pendente(s) da rota anterior!
+                      </span>
+                      <p className="text-[11px] text-slate-300">
+                        Como deseja processar as {selectedItems.length} paradas deste novo romaneio escaneado?
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setImportMode('append')}
+                      className={`flex-1 sm:flex-initial px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        importMode === 'append'
+                          ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-950'
+                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <span>➕ Somar às {existingPendingStops.length} Pendentes</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setImportMode('replace')}
+                      className={`flex-1 sm:flex-initial px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        importMode === 'replace'
+                          ? 'bg-rose-600 text-white shadow-lg shadow-rose-950'
+                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <span>🔄 Substituir Rota</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-800">
                 <button
                   type="button"
@@ -1565,9 +1620,15 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      <span>
-                        Gerar Rota Otimizada ({selectedItems.length} entrega{selectedItems.length !== 1 ? 's' : ''})
-                      </span>
+                      {importMode === 'append' && hasExistingPending ? (
+                        <span>
+                          Somar e Reotimizar ({selectedItems.length} novas + {existingPendingStops.length} pendentes)
+                        </span>
+                      ) : (
+                        <span>
+                          Gerar Rota Otimizada ({selectedItems.length} entrega{selectedItems.length !== 1 ? 's' : ''})
+                        </span>
+                      )}
                     </>
                   )}
                 </button>

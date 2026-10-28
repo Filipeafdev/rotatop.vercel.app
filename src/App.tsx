@@ -392,8 +392,12 @@ export default function App() {
     showToast('Parada reaberta como pendente.');
   };
 
-  // Import stops from OCR
-  const handleImportOcrStops = (draftItems: ManifestItemDraft[], images?: string[]) => {
+  // Import stops from OCR (supports appending new manifest to previous pending deliveries)
+  const handleImportOcrStops = (
+    draftItems: ManifestItemDraft[],
+    images?: string[],
+    appendMode: boolean = true
+  ) => {
     if (draftItems.length === 0) return;
 
     // Detect primary municipality of imported stops
@@ -404,6 +408,7 @@ export default function App() {
       id: `stop-ocr-${Date.now()}-${idx}`,
       routeId: activeRoute.id,
       sequenceIndex: idx + 1,
+      orderNumber: item.orderNumber,
       clientName: item.clientName,
       address: item.address,
       lat: typeof item.lat === 'number' ? item.lat : cityAnchor.lat + (Math.random() - 0.5) * 0.03,
@@ -419,7 +424,18 @@ export default function App() {
 
     // If activeRoute only contains the initial sample stops (init-stop-...), replace them completely
     const isReplacingInitialSample = activeRoute.stops.some((s) => s.id.startsWith('init-stop'));
-    const stopsToUse = isReplacingInitialSample ? newStops : [...activeRoute.stops, ...newStops];
+
+    let stopsToUse: Stop[] = [];
+    let previousPendingCount = 0;
+
+    if (isReplacingInitialSample || !appendMode) {
+      stopsToUse = newStops;
+    } else {
+      // Keep unfinished pending stops from yesterday/previous romaneio
+      const previousPending = activeRoute.stops.filter((s) => s.status !== 'entregue');
+      previousPendingCount = previousPending.length;
+      stopsToUse = [...previousPending, ...newStops];
+    }
 
     // Origin / Destination resolution:
     // If company bases are registered by the gestor, prioritize the default base
@@ -447,8 +463,8 @@ export default function App() {
       endCoords = startCoords;
     }
 
-    const totalWeightSum = stopsToUse.reduce((acc, s) => acc + s.totalWeight, 0);
-    const totalValueSum = stopsToUse.reduce((acc, s) => acc + s.orderValue, 0);
+    const totalWeightSum = Number(stopsToUse.reduce((acc, s) => acc + (s.totalWeight || 0), 0).toFixed(2));
+    const totalValueSum = Number(stopsToUse.reduce((acc, s) => acc + (s.orderValue || 0), 0).toFixed(2));
 
     const opt = optimizeRouteStops(
       stopsToUse,
@@ -458,13 +474,21 @@ export default function App() {
       activeRoute.fuelPrice
     );
 
+    // Merge manifest photos from all scanned romaneios
+    const combinedImages = Array.from(
+      new Set([
+        ...(appendMode && !isReplacingInitialSample ? activeRoute.manifestImages || [] : []),
+        ...(images || []),
+      ])
+    );
+
     const updatedRoute: Route = {
       ...activeRoute,
       startAddress,
       startCoords,
       endAddress,
       endCoords,
-      manifestImages: images && images.length > 0 ? images : activeRoute.manifestImages,
+      manifestImages: combinedImages.length > 0 ? combinedImages : activeRoute.manifestImages,
       stops: opt.orderedStops,
       productiveKm: opt.productiveKm,
       unproductiveKm: opt.unproductiveKm,
@@ -472,11 +496,21 @@ export default function App() {
       estimatedFuelCost: opt.estimatedFuelCost,
       totalWeight: totalWeightSum,
       totalValue: totalValueSum,
+      deliveredWeight: 0,
+      deliveredValue: 0,
+      updatedAt: new Date().toISOString(),
     };
 
     handleUpdateRoute(updatedRoute);
     setDriverTab('execucao');
-    showToast(`${draftItems.length} paradas de ${detectedCity} importadas e rota otimizada!`);
+
+    if (appendMode && previousPendingCount > 0) {
+      showToast(
+        `➕ ${newStops.length} novas entregas somadas às ${previousPendingCount} pendentes! Rota reotimizada com ${stopsToUse.length} paradas no total.`
+      );
+    } else {
+      showToast(`${draftItems.length} paradas de ${detectedCity} importadas e rota otimizada!`);
+    }
   };
 
   // Move stop position up or down in delivery sequence
