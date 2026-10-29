@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
@@ -250,7 +250,7 @@ Não inclua nenhum texto antes ou depois do JSON.`;
       });
     });
 
-    // Model pool using valid @google/genai models
+    // Model pool using valid @google/genai models in priority sequence
     const modelPool = [
       'gemini-3.8-flash',
       'gemini-flash-latest',
@@ -261,43 +261,69 @@ Não inclua nenhum texto antes ou depois do JSON.`;
     let lastError: any = null;
 
     for (const modelName of modelPool) {
-      try {
-        console.log(`[OCR] Trying model: ${modelName} with ${inputImages.length} image(s)`);
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: [
-            {
-              role: 'user',
-              parts: contentParts,
+      // Allow up to 2 attempts per model for transient 503/429 demand spikes
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          console.log(`[OCR] Trying model: ${modelName} (attempt ${attempt}) with ${inputImages.length} image(s)`);
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                role: 'user',
+                parts: contentParts,
+              },
+            ],
+            config: {
+              responseMimeType: 'application/json',
             },
-          ],
-          config: {
-            responseMimeType: 'application/json',
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          },
-        });
+          });
 
-        if (response && response.text && response.text.trim().length > 0) {
-          extractedText = response.text.trim();
-          console.log(`[OCR] Success with model ${modelName}, length: ${extractedText.length}`);
-          break;
+          if (response && response.text && response.text.trim().length > 0) {
+            extractedText = response.text.trim();
+            console.log(`[OCR] Success with model ${modelName}, length: ${extractedText.length}`);
+            break;
+          }
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`[OCR] Model ${modelName} (attempt ${attempt}) error:`, err?.status || err?.message || err);
+          
+          // Exponential backoff if high demand (503/429)
+          const isDemandSpike =
+            err?.status === 503 ||
+            err?.status === 429 ||
+            String(err?.message || '').includes('503') ||
+            String(err?.message || '').includes('high demand') ||
+            String(err?.message || '').includes('UNAVAILABLE');
+
+          if (attempt < 2 && isDemandSpike) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          } else {
+            break;
+          }
         }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[OCR] Model ${modelName} error:`, err?.message || err);
-        // Short backoff before next model attempt
-        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+
+      if (extractedText) {
+        break;
       }
     }
 
     if (!extractedText) {
       const errMsg = lastError?.message || 'Falha ao processar OCR com os modelos de IA disponíveis.';
-      const isOverloaded = errMsg.includes('503') || errMsg.includes('high demand');
+      console.error('[OCR] All models in pool failed. Last error:', errMsg);
+      const isOverloaded =
+        lastError?.status === 503 ||
+        lastError?.status === 429 ||
+        errMsg.includes('503') ||
+        errMsg.includes('high demand') ||
+        errMsg.includes('UNAVAILABLE');
+
       return res.status(isOverloaded ? 503 : 500).json({
         success: false,
+        isOverloaded,
         error: isOverloaded
-          ? 'Os servidores da IA estão temporariamente com alta demanda (503). Tente novamente em alguns segundos ou use a digitação assistida com a foto ao lado.'
-          : errMsg,
+          ? 'Os servidores da IA estão temporariamente com alta demanda de processamento (503). Você pode tentar novamente em alguns segundos ou carregar as paradas do romaneio diretamente.'
+          : `Erro ao processar o romaneio com IA: ${errMsg}`,
       });
     }
 
@@ -357,6 +383,7 @@ Não inclua nenhum texto antes ou depois do JSON.`;
 
       return {
         id: `ocr-${Date.now()}-${idx}`,
+        orderNumber: String(item.orderNumber || '').trim(),
         clientName: String(item.clientName || `Cliente ${idx + 1}`).replace(/\*+/g, '').trim(),
         city: detectedCity,
         address: cleanAddress,
@@ -365,6 +392,8 @@ Não inclua nenhum texto antes ou depois do JSON.`;
         paymentMethod: item.paymentMethod === 'a_prazo' ? 'a_prazo' : 'a_vista',
         notes: String(item.notes || '').trim(),
         isPriority: idx === 0,
+        hasSignature: Boolean(item.hasSignature),
+        signatureNotes: String(item.signatureNotes || '').trim(),
       };
     });
 
