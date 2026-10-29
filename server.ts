@@ -190,54 +190,49 @@ app.post('/api/ocr-romaneio', async (req: Request, res: Response) => {
       });
     }
 
-    const prompt = `Você é um leitor óptico especialista em romaneios e planilhas de transporte e logística no Brasil.
+    const prompt = `Você é um leitor óptico especialista em romaneios físicos de carga, notas fiscais e pranchetas de entrega de logística no Brasil.
 Você recebeu ${inputImages.length} imagem(ns)/página(s) de um romaneio de carga ou entregas.
-Analise todas as imagens com extrema atenção ao alinhamento horizontal linha por linha, concatenando todas as paradas encontradas sem duplicar cabeçalhos.
 
-Mapeamento exato das colunas da tabela:
-- P_Ped: Identificador do fornecedor
-- CNPJ: CNPJ do cliente
-- Razão Social: Nome empresarial do destinatário (remova asteriscos e espaços extras)
-- Ramo: Segmento de atuação
-- Cidades: MUNICÍPIO DA ENTREGA (ex: CAMPINAS, PAULINIA, SUMARE, HORTOLANDIA, VALINHOS). Mantenha este nome no campo "city".
-- Bairros: Bairro da entrega
-- Endereço: Rua, avenida e número
-- Forma Pgto: Condição de pagamento (ex: 'Boleto 21 Dias', 'Boleto 07 Dias', 'A Vista')
-- Pedido: Número do pedido (ex: 6540297)
-- Valores2: VALOR TOTAL DO PEDIDO EM REAIS (ex: 719,46; 363,76; 3666,77).
-- Pesos: PESO TOTAL EM KG (ex: 17,9; 9,723; 68,644).
-- Vol: Volume em m³
+INSTRUÇÕES DE RECONHECIMENTO:
+Documentos de logística no Brasil costumam vir em dois formatos principais:
+1. FORMATO EM BLOCOS / FICHAS (ex: Romaneio de Carga / Distribuição de Moinho, Atacado ou Transportadora):
+   - Cada entrega é um bloco retangular ou seção com:
+     * Razão Social / Destinatário (ex: "52822 - C. CARVALHO GENEROSO MERCADO LTDA ( 52822-MERCADO GENERO )") -> Extraia o nome do cliente no campo "clientName".
+     * Endereço (ex: "End: RUA JERONIMO MENDONCA, 349", "Bairro: JARDIM CAMPO BELO", "CAMPINAS") -> Monte "address" e "city".
+     * Pedido e Nota Fiscal (ex: "Nota: 2218161 Ped: 3032369") -> "orderNumber": "3032369" e inclua na nota.
+     * Valor (ex: "Valor: 1.075,80" ou "VALOR 1.075,80") -> "orderValue": 1075.80 (número decimal).
+     * Condição de Pagamento (ex: "A VISTA C/ 35 DI BANCO", "Boleto", "A Vista") -> "paymentMethod": 'a_prazo' ou 'a_vista'.
+     * Visto / Assinatura / Carimbo: Se o campo Carimbo/RG/Assinatura estiver com visto de caneta, carimbo ou assinatura manual, defina "hasSignature": true, senão false.
 
-REGRAS CRÍTICAS DE EXTRAÇÃO:
-1. NÃO desloque os números de uma linha para a linha adjacente! Cada linha possui estritamente seu próprio Pedido, Valores2 e Pesos na mesma altura horizontal.
-   - A Linha 1 (IVONE A OLIVEIRA) tem Valores2 = 719.46 e Pesos = 17.9.
-   - A Linha 2 (CAROLINE E MOREIRA) tem Valores2 = 363.76 e Pesos = 9.723.
-   - A Linha 3 (MARIA ANGELICA AGUIAR) tem Valores2 = 3666.77 e Pesos = 68.644.
-   - Siga rigorosamente esta correspondência horizontal linha por linha até o fim da tabela.
-2. NUNCA retorne 0 ou nulo se houver valor preenchido na coluna Valores2 ou Pesos daquela linha.
-3. Extraia o município da coluna 'Cidades' para o campo "city" (ex: "Campinas").
-4. Monte o campo "address" completo: "[Endereço], [Bairros], [Cidades] - SP, Brasil".
-5. Extraia para "notes" a condição de pagamento e o número do pedido (ex: "Boleto 21 Dias - Pedido 6540297").
-6. Extraia para "orderNumber" o número do pedido ou nota fiscal (ex: "6540297").
-7. DETECÇÃO DE ENTREGAS JÁ REALIZADAS / ASSINADAS NO PAPEL:
-   - Inspecione a coluna de assinatura/recebedor ou a margem da linha.
-   - Se houver qualquer assinatura à mão, rubrica de caneta, visto (✓), carimbo, anotação manual de data ou "OK", defina "hasSignature": true e descreva em "signatureNotes" (ex: "Assinatura de recebedor detectada").
-   - Caso a linha esteja limpa/em branco sem assinatura manual, defina "hasSignature": false e "signatureNotes": "".
-8. Se houver mais de uma página/foto, consolide todas as paradas em uma única lista sequencial sem duplicar.
+2. FORMATO EM TABELA / PLANILHA (Linhas e colunas horizontais):
+   - Colunas: Razão Social, Endereço, Bairro, Cidades, Valores2, Pesos, Pedido.
+   - Mantenha estritamente o alinhamento horizontal de cada linha sem misturar dados entre linhas vizinhas.
 
-Retorne ESTRITAMENTE um array JSON contendo os objetos com os campos:
-- orderNumber: string
-- clientName: string
-- city: string
-- address: string
-- orderValue: number (float decimal)
-- totalWeight: number (float decimal)
-- paymentMethod: 'a_prazo' se Boleto/A Prazo/Faturado; 'a_vista' se Dinheiro/À Vista/PIX
-- notes: string
-- hasSignature: boolean
-- signatureNotes: string
+REGRAS GERAIS:
+- Extraia TODAS as paradas/entregas visíveis em todas as ${inputImages.length} foto(s), concatenando-as em sequência sem duplicar cabeçalhos de documento.
+- Sempre extraia o município para o campo "city" (ex: "Campinas", "Sumaré", "Paulínia", "Valinhos", "Hortolândia", etc.).
+- Monte o endereço completo com rua, número, bairro e cidade no campo "address".
+- "orderValue": valor total do pedido como float decimal (ex: 1075.80; se não encontrar, use 0).
+- "totalWeight": peso total em kg como float decimal (ex: 18.5; se não encontrar, use 0).
+- "hasSignature": boolean indicando se aquela entrega já foi rubricada/carimbada/recebida na folha física.
+- "signatureNotes": descrição breve da baixa detectada (ou vazia se não houver).
 
-Não inclua nenhum texto antes ou depois do JSON.`;
+Retorne ESTRITAMENTE um array JSON com os objetos:
+[
+  {
+    "orderNumber": string,
+    "clientName": string,
+    "city": string,
+    "address": string,
+    "orderValue": number,
+    "totalWeight": number,
+    "paymentMethod": "a_prazo" | "a_vista",
+    "notes": string,
+    "hasSignature": boolean,
+    "signatureNotes": string
+  }
+]
+Não inclua nenhum texto explicativo, crases adicionais ou comentários além do JSON.`;
 
     // Construct multimodal content parts with all images
     const contentParts: any[] = [{ text: prompt }];
@@ -309,21 +304,31 @@ Não inclua nenhum texto antes ou depois do JSON.`;
     }
 
     if (!extractedText) {
-      const errMsg = lastError?.message || 'Falha ao processar OCR com os modelos de IA disponíveis.';
-      console.error('[OCR] All models in pool failed. Last error:', errMsg);
+      let rawMsg = 'Falha ao processar OCR com os modelos de IA disponíveis.';
+      if (typeof lastError === 'string') {
+        rawMsg = lastError;
+      } else if (lastError?.message) {
+        try {
+          const parsed = JSON.parse(lastError.message);
+          rawMsg = parsed?.error?.message || lastError.message;
+        } catch {
+          rawMsg = String(lastError.message);
+        }
+      }
+      console.error('[OCR] All models in pool failed. Clean message:', rawMsg);
       const isOverloaded =
         lastError?.status === 503 ||
         lastError?.status === 429 ||
-        errMsg.includes('503') ||
-        errMsg.includes('high demand') ||
-        errMsg.includes('UNAVAILABLE');
+        rawMsg.includes('503') ||
+        rawMsg.includes('high demand') ||
+        rawMsg.includes('UNAVAILABLE');
 
       return res.status(isOverloaded ? 503 : 500).json({
         success: false,
         isOverloaded,
         error: isOverloaded
           ? 'Os servidores da IA estão temporariamente com alta demanda de processamento (503). Você pode tentar novamente em alguns segundos ou carregar as paradas do romaneio diretamente.'
-          : `Erro ao processar o romaneio com IA: ${errMsg}`,
+          : `Erro ao processar o romaneio com IA: ${rawMsg}`,
       });
     }
 

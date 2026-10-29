@@ -225,8 +225,45 @@ export const CAMPINAS_ATTACHED_SHEET_ITEMS: ManifestItemDraft[] = [
   },
 ];
 
+// Romaneio Moinho / C. Carvalho Generoso (Romaneio impresso em bloco)
+export const MOINHO_CARVALHO_ITEMS: ManifestItemDraft[] = [
+  {
+    id: 'moinho-1',
+    orderNumber: '3032369',
+    clientName: 'C. CARVALHO GENEROSO MERCADO LTDA (MERCADO GENERO)',
+    city: 'Campinas',
+    address: 'Rua Jerônimo Mendonça, 349, Jardim Campo Belo, Campinas - SP, Brasil',
+    orderValue: 1075.80,
+    totalWeight: 25.0,
+    isPriority: true,
+    paymentMethod: 'a_prazo',
+    notes: 'Nota 2218161 - A VISTA C/ 35 DI BANCO - Pedido 3032369',
+    hasSignature: false,
+    signatureNotes: '',
+  },
+  {
+    id: 'moinho-2',
+    orderNumber: '3032370',
+    clientName: 'C. CARVALHO GENEROSO MERCADO LTDA (MERCADO GENERO)',
+    city: 'Campinas',
+    address: 'Rua Izidoro Bonnardi, 5, Jardim Maracanã, Campinas - SP, Brasil',
+    orderValue: 482.94,
+    totalWeight: 14.0,
+    isPriority: false,
+    paymentMethod: 'a_prazo',
+    notes: 'Nota 2218160 - A VISTA C/ 35 DI BANCO - Pedido 3032370',
+    hasSignature: false,
+    signatureNotes: '',
+  },
+];
+
 // Sample presets for testing
 const PRESET_SAMPLE_MANIFESTS = [
+  {
+    name: 'Romaneio Moinho / Carga (Carvalho Generoso)',
+    tag: 'Romaneio Carga',
+    items: MOINHO_CARVALHO_ITEMS,
+  },
   {
     name: 'Planilha Real Campinas (17 entregas - Arquivo Anexo)',
     tag: 'Campinas Real',
@@ -521,10 +558,15 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(
-          result.error ||
-            'Não foi possível extrair dados automaticamente. O serviço de IA pode estar com alta demanda temporária.'
-        );
+        let errorMsg = 'Não foi possível extrair dados automaticamente.';
+        if (typeof result.error === 'string') {
+          errorMsg = result.error;
+        } else if (result.error && typeof result.error === 'object') {
+          errorMsg = result.error.message || result.error.error || JSON.stringify(result.error);
+        } else if (typeof result.message === 'string') {
+          errorMsg = result.message;
+        }
+        throw new Error(errorMsg);
       }
 
       // Check if server directly parsed items
@@ -582,11 +624,15 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
       setShowImagePreviewInTable(true);
     } catch (err: any) {
       console.error('OCR processing error:', err);
-      // NEVER silently substitute fake data!
-      setErrorMessage(
-        err.message ||
-          'Falha na leitura automática da imagem. Você pode tentar novamente, colar o texto ou digitar as paradas.'
-      );
+      let userFriendlyMsg = 'Falha na leitura automática da imagem.';
+      if (typeof err === 'string') {
+        userFriendlyMsg = err;
+      } else if (err?.message && err.message !== '[object Object]') {
+        userFriendlyMsg = err.message;
+      } else if (err?.error) {
+        userFriendlyMsg = typeof err.error === 'string' ? err.error : (err.error.message || JSON.stringify(err.error));
+      }
+      setErrorMessage(userFriendlyMsg);
     } finally {
       setIsProcessing(false);
     }
@@ -804,6 +850,19 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  setExtractedItems(MOINHO_CARVALHO_ITEMS);
+                  setShowImagePreviewInTable(true);
+                  setErrorMessage(null);
+                }}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg flex items-center gap-1 shadow cursor-pointer"
+              >
+                <Check className="w-3 h-3" />
+                <span>Carregar Romaneio Moinho (Carvalho Generoso)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
                   setExtractedItems(CAMPINAS_ATTACHED_SHEET_ITEMS);
                   setShowImagePreviewInTable(true);
                   setErrorMessage(null);
@@ -811,7 +870,7 @@ export const OcrManifestModal: React.FC<OcrManifestModalProps> = ({
                 className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg flex items-center gap-1 shadow cursor-pointer"
               >
                 <Check className="w-3 h-3" />
-                <span>Carregar Imediatamente as 17 Paradas de Campinas</span>
+                <span>Carregar 17 Paradas de Campinas</span>
               </button>
 
               <button
